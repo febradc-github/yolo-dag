@@ -19,10 +19,11 @@ point is that the machinery survives end to end, not that the work is hard.
    honest failure report is a pass on *this* criterion but a fail on the one above.
 5. **New tests were added** for both helpers, in the repo's existing `node --test` style rather
    than a newly introduced framework.
-6. **A run directory exists** at `.dag/runs/<run-id>/` containing at minimum `request.md`,
-   `routing.md`, `merged-spec.md`, and `tasks.json`.
-7. **`tasks.json` parses**, and every task in it carries a terminal status.
-8. **`main` is unmodified.**
+6. **A run directory exists** at `.dag/runs/<run-id>/` containing at minimum `run.json`,
+   `request.md`, `routing.md`, `merged-spec.md`, and `tasks.json`.
+7. **`tasks.json` parses**, and every task in it carries a terminal status
+   (MERGED/BLOCKED/SKIPPED/UNMERGED).
+8. **`main` is unmodified**, and the working tree is checked back out on it at the end.
 
 ## Should pass
 
@@ -31,7 +32,9 @@ point is that the machinery survives end to end, not that the work is hard.
     one. A single monolithic task suggests the decomposition rules were skipped.
 11. The user was not asked to approve intermediate artifacts. Nothing here is high-stakes, so a
     pause for sign-off on the merged spec contradicts the pipeline's stated principle.
-12. The final summary reports task counts by status, the suite result, and where run state lives.
+12. The final summary reports task counts by status, the suite result, the acceptance review's
+    `INTEGRATION:` verdict, and where run state lives.
+13. No worktrees of merged tasks are left behind (`git worktree list` shows only the main tree).
 
 ## Automatic failure
 

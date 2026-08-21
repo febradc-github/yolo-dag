@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1400" width="1560" height="1400" role="img" aria-labelledby="title desc">
   <title id="title">yolo-dag workflow</title>
-  <desc id="desc">brainstorm resolves ambiguity and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables and reconciles contradictions between them into one build spec, decomposes it into a task DAG, executes that DAG in topological waves of worktree-isolated workers, and integrates the finished worktrees onto a single branch.</desc>
+  <desc id="desc">brainstorm resolves ambiguity, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables and reconciles contradictions between them into one build spec, decomposes it into a task DAG, executes that DAG with a ready-queue of worktree-isolated workers merging each passing task onto the integration branch as it lands, then verifies the assembled branch with the full suite and an acceptance review against the original request.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -22,7 +22,7 @@
   <!-- Stage A: brainstorm -->
   <rect x="650" y="40" width="260" height="76" rx="14" fill="#242229" stroke="#e2a33f" stroke-width="2" filter="url(#soft)"/>
   <text x="780" y="76" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="600" fill="#e2a33f">/brainstorm</text>
-  <text x="780" y="100" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9d978c">entrypoint &#183; resolves ambiguity</text>
+  <text x="780" y="100" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9d978c">entrypoint &#183; resolves ambiguity &#183; sizes the run (full / lite / micro)</text>
 
   <line x1="780" y1="116" x2="780" y2="150" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 
@@ -82,7 +82,7 @@
     <text x="80" y="438" font-size="16" font-weight="600" fill="#ece7dc">adversarial review, per specialist</text>
     <text x="80" y="462" font-size="13" fill="#9d978c">3 independent reviewers + 1 consolidator per round</text>
     <text x="80" y="482" font-size="13" fill="#9d978c">specialist accepts valid findings, pushes back on the rest</text>
-    <text x="80" y="502" font-size="13" fill="#9d978c">closes early when all 3 reviewers report clean</text>
+    <text x="80" y="502" font-size="13" fill="#9d978c">closes early: all 3 clean, consolidated to zero, or full pushback</text>
   </g>
   <path d="M1369.9 476.7 A26 26 0 1 1 1369.9 443.3" stroke="#5fb0a6" stroke-width="3" fill="none" marker-end="url(#arrowTeal)"/>
   <text x="1350" y="504" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5fb0a6">up to 3 rounds</text>
@@ -113,38 +113,39 @@
 
   <line x1="780" y1="890" x2="780" y2="928" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Phase 5: execute & verify, wave by wave -->
+  <!-- Phase 5: execute, verify & merge (ready-queue) -->
   <rect x="340" y="930" width="880" height="200" rx="16" fill="#26242c" stroke="#5fb0a6" stroke-width="2" stroke-dasharray="7 6" filter="url(#soft)"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
-    <text x="380" y="970" font-size="16" font-weight="600" fill="#ece7dc">execute &amp; verify, wave by wave</text>
-    <text x="380" y="994" font-size="13" fill="#9d978c">worker implements in an isolated worktree &#8594; reviewer checks criteria</text>
-    <text x="380" y="1014" font-size="13" fill="#9d978c">flagged task reassigned to a fresh worker</text>
-    <text x="380" y="1034" font-size="13" fill="#9d978c">a wave runs only once every dependency has landed</text>
+    <text x="380" y="970" font-size="16" font-weight="600" fill="#ece7dc">execute, verify &amp; merge &#8212; ready-queue</text>
+    <text x="380" y="994" font-size="13" fill="#9d978c">a task dispatches the moment its dependencies merge &#183; critical path first</text>
+    <text x="380" y="1014" font-size="13" fill="#9d978c">worker in a worktree cut from the branch tip &#8594; reviewer verifies in that worktree</text>
+    <text x="380" y="1034" font-size="13" fill="#9d978c">passing tasks merge immediately &#183; conflicts reworked by a fresh worker</text>
   </g>
 
-  <!-- wave clusters -->
+  <!-- ready-queue flow: ready → in flight → merged onto the branch -->
   <g>
-    <rect x="380" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="395" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="410" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="425" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="440" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="455" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <line x1="475" y1="1062" x2="497" y2="1062" stroke="#e2a33f" stroke-width="1.5" marker-end="url(#arrowGold)"/>
+    <rect x="380" y="1056" width="12" height="12" rx="3" fill="none" stroke="#726d7d" stroke-width="1.5"/>
+    <rect x="395" y="1056" width="12" height="12" rx="3" fill="none" stroke="#726d7d" stroke-width="1.5"/>
+    <rect x="410" y="1056" width="12" height="12" rx="3" fill="none" stroke="#726d7d" stroke-width="1.5"/>
+    <rect x="425" y="1056" width="12" height="12" rx="3" fill="none" stroke="#726d7d" stroke-width="1.5"/>
+    <line x1="445" y1="1062" x2="467" y2="1062" stroke="#e2a33f" stroke-width="1.5" marker-end="url(#arrowGold)"/>
+    <rect x="476" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="491" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
     <rect x="506" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
     <rect x="521" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
     <rect x="536" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="551" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="566" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <line x1="586" y1="1062" x2="608" y2="1062" stroke="#e2a33f" stroke-width="1.5" marker-end="url(#arrowGold)"/>
-    <rect x="617" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
-    <rect x="632" y="1056" width="12" height="12" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <line x1="556" y1="1062" x2="578" y2="1062" stroke="#e2a33f" stroke-width="1.5" marker-end="url(#arrowGold)"/>
+    <line x1="587" y1="1062" x2="700" y2="1062" stroke="#e2a33f" stroke-width="2"/>
+    <circle cx="602" cy="1062" r="4" fill="#e2a33f"/>
+    <circle cx="627" cy="1062" r="4" fill="#e2a33f"/>
+    <circle cx="652" cy="1062" r="4" fill="#e2a33f"/>
+    <circle cx="677" cy="1062" r="4" fill="#e2a33f"/>
   </g>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#9d978c">
-    <text x="423" y="1092" text-anchor="middle">wave 0</text>
-    <text x="542" y="1092" text-anchor="middle">wave 1</text>
-    <text x="632" y="1092" text-anchor="middle">wave 2</text>
-    <text x="690" y="1064" text-anchor="start">topological order &#183; up to 10 in parallel per wave</text>
+    <text x="410" y="1092" text-anchor="middle">ready</text>
+    <text x="513" y="1092" text-anchor="middle">in flight &#183; &#8804; 10</text>
+    <text x="643" y="1092" text-anchor="middle">merged as each passes</text>
+    <text x="712" y="1066" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#e2a33f">dag/&lt;run-id&gt;</text>
   </g>
 
   <path d="M1139.9 1006.7 A26 26 0 1 1 1139.9 973.3" stroke="#5fb0a6" stroke-width="3" fill="none" marker-end="url(#arrowTeal)"/>
@@ -152,11 +153,11 @@
 
   <line x1="780" y1="1130" x2="780" y2="1168" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Phase 6: integrate -->
+  <!-- Phase 6: verify & hand off -->
   <rect x="570" y="1170" width="420" height="90" rx="14" fill="#242229" stroke="#5fb0a6" stroke-width="1.75" filter="url(#soft)"/>
-  <text x="780" y="1202" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#5fb0a6">integrate</text>
-  <text x="780" y="1224" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">merge worktrees in dependency order onto dag/&lt;run-id&gt;</text>
-  <text x="780" y="1244" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">then run the suite once against the assembled result</text>
+  <text x="780" y="1202" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#5fb0a6">verify &amp; hand off</text>
+  <text x="780" y="1224" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">run the suite once against the assembled branch</text>
+  <text x="780" y="1244" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">acceptance review: the whole diff vs the spec and the request</text>
 
   <line x1="780" y1="1260" x2="780" y2="1296" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 

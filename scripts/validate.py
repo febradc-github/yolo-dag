@@ -3,9 +3,12 @@
 
 Checks the invariants that no amount of careful editing reliably preserves by hand:
 manifests parse, agent frontmatter is well-formed, tool names are real, the phase
-numbering agrees between the orchestrator and every agent that cites it, and the
-literal status-line contracts the orchestrator branches on actually exist in the
-agents that are supposed to emit them.
+numbering agrees between the orchestrator and every agent that cites it, the literal
+status-line contracts the orchestrator branches on actually exist in the agents that
+are supposed to emit them, the mode table is identical in all three files that state
+it, every flag an argument-hint documents is one the orchestrator parses, the
+run.json keys commands read are keys the orchestrator writes, and each eval case's
+name matches its directory.
 
 No third-party dependencies — runs on a bare Python 3.
 Usage: python3 scripts/validate.py   (exit 0 = clean, 1 = failures)
@@ -52,16 +55,40 @@ PRIMARY_PHASE = {
     "task-specialist": 4,
     "task-worker": 5,
     "task-reviewer": 5,
+    "integration-reviewer": 6,
 }
 
 # Literal status lines the orchestrator branches on. If an agent stops emitting its
 # contract, the pipeline misroutes silently rather than erroring — so assert both ends.
+# task-worker's trailer is the load-bearing one: it is the only channel through which the
+# pipeline learns where a worker's output physically lives.
 CONTRACTS = {
     "spec-reviewer": ["REVIEW: CLEAN", "REVIEW: FINDINGS"],
     "spec-consolidator": ["CONSOLIDATED:"],
     "spec-reconciler": ["RECONCILE: CLEAN", "RECONCILE: CONTRADICTIONS"],
+    "task-worker": ["WORKTREE:", "BRANCH:", "COMMIT:", "BLOCKER:"],
     "task-reviewer": ["VERDICT: PASS", "VERDICT: FLAGGED"],
+    "integration-reviewer": ["INTEGRATION: PASS", "INTEGRATION: FLAGGED"],
 }
+
+# The mode table is stated in three places; drift between them is exactly the class of bug
+# the phase-numbering check exists to catch. All three must contain an identical table.
+MODE_TABLE_FILES = [
+    "README.md",
+    "skills/brainstorm/SKILL.md",
+    "skills/orchestrator/SKILL.md",
+]
+MODE_ROW_LABELS = {"Phases", "Specialists", "Review rounds", "Concurrent tasks",
+                   "Soft spawn budget"}
+
+# Keys the orchestrator writes to run.json. The commands read this file; a command reading
+# a key the orchestrator never writes fails silently at runtime, so pin both ends.
+RUN_JSON_KEYS = {
+    "run_id", "mode", "plan_only", "base_branch", "base_commit", "clean_start",
+    "integration_branch", "phases", "specialists", "spawns", "degradations",
+}
+# Non-run.json snake_case keys commands may legitimately reference (tasks.json fields).
+COMMAND_KEY_ALLOWLIST = RUN_JSON_KEYS | {"depends_on", "acceptance_criteria"}
 
 # Tools an agent must NOT have, with the reason, so a regression explains itself.
 FORBIDDEN_TOOLS = {
@@ -248,7 +275,7 @@ def check_orchestrator(agents: dict[str, dict]) -> None:
 
 def check_commands() -> None:
     for path in sorted((ROOT / "commands").glob("*.md")):
-        data, _ = parse_frontmatter(path)
+        data, body = parse_frontmatter(path)
         if not data.get("description"):
             fail(f"{path.relative_to(ROOT)}: missing `description`")
         tools = data.get("allowed-tools")
@@ -256,6 +283,101 @@ def check_commands() -> None:
             for tool in tools:
                 if tool not in VALID_TOOLS:
                     fail(f"{path.relative_to(ROOT)}: unknown tool {tool!r}")
+
+        # A command reading a run.json/tasks.json key the orchestrator never writes fails
+        # silently at runtime — every backticked snake_case key must be a known one.
+        for key in set(re.findall(r"`([a-z]+(?:_[a-z]+)+)`", body)):
+            if key not in COMMAND_KEY_ALLOWLIST:
+                fail(f"{path.relative_to(ROOT)}: references key `{key}`, which is not in "
+                     f"the orchestrator's run.json/tasks.json schema")
+
+
+def extract_mode_table(text: str) -> dict[str, tuple[str, ...]]:
+    """Return {row label: cells} for the markdown table whose header names the modes."""
+    rows: dict[str, tuple[str, ...]] = {}
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("|") and "`full`" in line and "`micro`" in line:
+            for row in lines[i + 1:]:
+                if not row.lstrip().startswith("|"):
+                    break
+                cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                if not cells or set(cells[0]) <= set("-: "):
+                    continue  # separator row
+                rows[cells[0]] = tuple(cells[1:])
+            break
+    return rows
+
+
+def check_mode_tables() -> None:
+    tables: dict[str, dict[str, tuple[str, ...]]] = {}
+    for rel in MODE_TABLE_FILES:
+        try:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+        except OSError as exc:
+            fail(f"{rel}: {exc}")
+            return
+        table = extract_mode_table(text)
+        if not table:
+            fail(f"{rel}: no mode table found (a header row naming `full` and `micro`)")
+            return
+        missing = MODE_ROW_LABELS - set(table)
+        if missing:
+            fail(f"{rel}: mode table is missing row(s) {sorted(missing)}")
+        tables[rel] = table
+
+    reference_file = MODE_TABLE_FILES[0]
+    reference = tables.get(reference_file, {})
+    for rel, table in tables.items():
+        if rel == reference_file:
+            continue
+        for label in sorted(set(reference) | set(table)):
+            if reference.get(label) != table.get(label):
+                fail(f"mode table drift on row {label!r}: {reference_file} says "
+                     f"{reference.get(label)}, {rel} says {table.get(label)}")
+
+
+def check_flags() -> None:
+    """Every flag a skill's argument-hint documents must be one the orchestrator parses."""
+    try:
+        orch = (ROOT / "skills" / "orchestrator" / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return  # already failed in check_orchestrator
+    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+        data, _ = parse_frontmatter(path)
+        hint = str(data.get("argument-hint", ""))
+        for flag in set(re.findall(r"mode=\w+|--[a-z][a-z-]*", hint)):
+            if flag not in orch:
+                fail(f"{path.relative_to(ROOT)}: documents flag `{flag}`, which the "
+                     f"orchestrator never parses")
+
+
+def check_run_json_schema() -> None:
+    """The orchestrator must define every run.json key the rest of the plugin reads."""
+    try:
+        orch = (ROOT / "skills" / "orchestrator" / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return
+    for key in sorted(RUN_JSON_KEYS):
+        if key not in orch:
+            fail(f"orchestrator: run.json key `{key}` is in the schema but never appears "
+                 f"in skills/orchestrator/SKILL.md")
+
+
+def check_evals() -> None:
+    """Each eval case's declared name must match its directory, or --case filtering and
+    the results layout silently target the wrong case."""
+    for path in sorted((ROOT / "evals").glob("*/case.yaml")):
+        text = path.read_text(encoding="utf-8")
+        match = re.search(r"^name:\s*(\S+)", text, re.MULTILINE)
+        if not match:
+            fail(f"{path.relative_to(ROOT)}: no `name:` field")
+        elif match.group(1) != path.parent.name:
+            fail(f"{path.relative_to(ROOT)}: name {match.group(1)!r} does not match "
+                 f"directory {path.parent.name!r}")
+        if "scaffold_script" in text and not (path.parent / "scaffold.sh").exists():
+            fail(f"{path.relative_to(ROOT)}: declares scaffold_script but scaffold.sh "
+                 f"is missing")
 
 
 def check_skills() -> None:
@@ -271,6 +393,10 @@ def main() -> int:
     check_orchestrator(agents)
     check_commands()
     check_skills()
+    check_mode_tables()
+    check_flags()
+    check_run_json_schema()
+    check_evals()
 
     for w in warnings:
         print(f"warning: {w}")

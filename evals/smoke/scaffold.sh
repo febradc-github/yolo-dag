@@ -3,7 +3,7 @@
 # has genuine conventions to match and a real suite Phase 6 can execute.
 set -euo pipefail
 
-git init -q .
+git init -q -b main .
 git config user.email "eval@example.com"
 git config user.name "Eval Harness"
 

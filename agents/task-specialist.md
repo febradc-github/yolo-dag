@@ -21,14 +21,17 @@ high-stakes; otherwise it proceeds straight to spawning you).
 
 Earlier versions of this pipeline required every task to be fully independent, and told you to
 fold genuinely-ordered work into one larger task. **That constraint is gone.** The Orchestrator
-now executes your output in topological waves: wave 0 is every task with no dependencies, wave
-*n* is every task whose dependencies all completed in earlier waves. Within a wave, tasks run
-concurrently in isolated worktrees, exactly as before.
+now executes your output with a ready-queue: a task is dispatched the moment every task in its
+`depends_on` has merged onto the run's integration branch, so a dependent's worktree **literally
+contains its dependencies' finished code**. (It still computes topological levels — "waves" — to
+prove your graph is acyclic and to report its shape.) Concurrent tasks run in isolated
+worktrees, exactly as before.
 
 So express a real ordering constraint as an **edge**, not as a fold. "Define the schema" and
 "write the migration that uses it" are now two tasks with an edge between them — which is better
 than one oversized task, because each half gets its own checkable acceptance criteria and its own
-focused review.
+focused review, and the migration's worker starts from a tree in which the schema already
+exists.
 
 ## Decomposition rules
 
@@ -50,9 +53,9 @@ Every task you emit must:
 5. **Be scoped for one `task-worker` pass** — small enough to complete and verify in one
    worktree-isolated run, not an open-ended multi-day effort.
 6. **Declare its expected file footprint** in `files`. Best effort is fine, but try: the
-   Orchestrator uses it to order Phase 6 integration and to warn about tasks in the same wave
-   that will fight over the same file. **Prefer decompositions that minimize file overlap between
-   siblings in a wave** — two tasks editing the same module concurrently is a merge conflict
+   Orchestrator uses it to warn about tasks that can be in flight at the same time and will
+   fight over the same file. **Prefer decompositions that minimize file overlap between tasks
+   that can run concurrently** — two tasks editing the same module at once is a merge conflict
    waiting to happen, and splitting along file boundaries usually costs nothing.
 
 Use `Read`/`Grep`/`Glob`/`Bash` to check the existing codebase so tasks are scoped against what's

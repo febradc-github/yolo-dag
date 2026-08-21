@@ -3,7 +3,7 @@
 # need to edit — the minimum setup that produces a genuine merge conflict in Phase 6.
 set -euo pipefail
 
-git init -q .
+git init -q -b main .
 git config user.email "eval@example.com"
 git config user.name "Eval Harness"
 

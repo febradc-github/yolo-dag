@@ -31,25 +31,47 @@ actually run it.
 | `routing` | cheap | Phase 1 skips specialists whose domain the request doesn't touch. |
 | `decomposition` | cheap | Phase 4 emits a valid, acyclic graph with checkable criteria. |
 | `review-loop` | medium | Phase 2 reviewers find a planted flaw and the specialist revises. |
-| `integration-conflict` | medium | Phase 6 detects a two-tasks-one-file conflict instead of losing a side. |
+| `cycle-rejection` | cheap, negative | A cyclic `tasks.json` is bounced to `task-specialist`, never executed, never silently de-edged. |
+| `blocked-propagation` | cheap, negative | A capped task stays BLOCKED, its dependent is SKIPPED unrun, unrelated work still merges. |
+| `resume` | medium | A run killed mid-Phase-5 resumes without redoing phases or re-executing merged tasks. |
+| `budget-degradation` | medium, negative | A near-ceiling spawn ledger forces degradation in the stated order, said and recorded. |
+| `integration-conflict` | medium | Two tasks editing one file both survive onto the branch instead of losing a side. |
 | `smoke` | expensive | A small real request survives all six phases onto a branch. |
 
 `smoke` is the one that matters and the one most likely to be flaky — it spawns real agents and
-writes real code. Run it deliberately, not on every push. The other four are cheap enough for CI
-once the runner is available.
+writes real code. Run it deliberately, not on every push. The cheap cases are cheap enough for
+CI once the runner is available.
 
-## Why these five
+### The seeding technique
 
-Each targets a defect class that actually shipped in `0.1.0`:
+The four negative-path cases (`cycle-rejection`, `blocked-propagation`, `resume`,
+`budget-degradation`) all work the same way: the scaffold writes a `.dag/runs/<id>/` directory
+in a known partial state and the prompt is just `/dag-resume <id>`. Failure paths that are
+expensive or nondeterministic to *provoke* (a task genuinely failing three reviews, a ledger
+crossing its ceiling) are cheap and deterministic to *seed* — the resume path is exercised for
+free as a side effect, and each run starts from an identical, hand-auditable state.
 
-- `routing` — every request fanned out to all 8 specialists regardless of relevance.
+## Why these
+
+Each targets a defect class that actually shipped, or a rule whose silent failure would be
+invisible until it mattered:
+
+- `routing` — in `0.1.0`, every request fanned out to all 8 specialists regardless of relevance.
 - `decomposition` — tasks were forbidden from having dependencies, so ordered work got folded
   into oversized single tasks.
 - `review-loop` — reviewers were told to report findings through a tool whose schema they could
   not satisfy.
-- `integration-conflict` — there was no integration phase at all; worker output was stranded in
-  worktrees.
+- `cycle-rejection` — a cycle deadlocks the ready-queue; the tempting "fix" (drop an edge)
+  silently changes the plan's meaning.
+- `blocked-propagation` — running a dependent against work that never landed produces confident
+  nonsense; skipping it silently produces a dishonest summary.
+- `resume` — persistence exists so a hundred-agent run survives a dropped connection; a resume
+  that redoes phases or re-executes merged tasks makes it pointless.
+- `budget-degradation` — in-memory spawn counting drifts downward across compaction, which is
+  silent overspend, the exact thing the ceiling exists to prevent.
+- `integration-conflict` — through `0.1.0` there was no integration at all; worker output was
+  stranded in worktrees while the run reported success.
 - `smoke` — nothing had ever been run end to end.
 
-A case that doesn't correspond to a way this pipeline has actually broken is probably not worth
-its runtime.
+A case that doesn't correspond to a way this pipeline has actually broken (or provably would)
+is probably not worth its runtime.
