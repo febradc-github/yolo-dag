@@ -1,6 +1,6 @@
 ---
 description: Entrypoint for the yolo-dag plugin — turns a raw, possibly ambiguous request into a fully-specified one, resolving ambiguity autonomously and asking the user only when a decision is genuinely high-stakes, then hands off to the orchestrator skill to actually build it.
-argument-hint: The request to run through the pipeline. Append `mode=lite` for a cheaper single-review-round run, or `--all` to force all 8 specialists.
+argument-hint: The request to run through the pipeline. Add `mode=lite` for a cheaper single-review-round run, `mode=full` to force the full 3-round pass, or `--all` to force all 8 specialists. With no flag, the run is sized automatically.
 ---
 
 # /brainstorm — Resolve the Request, Then Hand Off
@@ -44,14 +44,24 @@ materially changes scope, or touches security/data in a way that's hard to walk 
 The orchestrator runs in one of two modes, and picking the wrong one wastes either money or
 quality. Pass the mode through in your handoff:
 
-- **`full`** (default) — every routed specialist, up to 3 review rounds each. Right for real
-  features, anything touching architecture or data, anything you'd want a second opinion on.
+- **`mode=full`** — every routed specialist, up to 3 review rounds each. Right for real features,
+  anything touching architecture or data, anything you'd want a second opinion on. This is also
+  the fallback when the request genuinely doesn't tell you which way to go: over-reviewing costs
+  money, under-reviewing costs correctness.
 - **`mode=lite`** — routing capped at 4 specialists, 1 review round, narrower execution waves.
   Right for small, well-understood, low-risk work where a full adversarial pass is overkill.
 
+`--all` is separate from the mode and combines with either: it forces all 8 specialists and skips
+the routing judgment in Phase 1.
+
 Choose it yourself from the shape of the request rather than asking, and say which you picked in
-one clause. If the user explicitly passed `mode=lite` or `--all` in `$ARGUMENTS`, honour that
-over your own judgment and pass the flag straight through.
+one clause.
+
+**An explicit flag in `$ARGUMENTS` overrides your judgment.** If the user passed `mode=lite`,
+`mode=full`, or `--all`, honour it and pass it straight through — including `mode=full` on a
+request you'd have sized as `lite` yourself. They know something about the stakes that the
+request text doesn't carry. Strip the flag from the request text you restate, so it doesn't leak
+into the specialists' prompts as if it were part of the requirement.
 
 ## Hand off
 

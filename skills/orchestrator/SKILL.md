@@ -1,6 +1,6 @@
 ---
 description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally handed off from the brainstorm skill), routes it to the relevant domain specialists, runs each through a 3-reviewer/1-consolidator review loop, merges and reconciles the results into one build spec, decomposes it into a task DAG, executes that DAG in topological waves, and integrates the finished worktrees onto one branch. Persists every phase to .dag/runs/<run-id>/ so an interrupted run can resume.
-argument-hint: A fully-specified request — normally the handoff from /brainstorm, but can be invoked directly if the request is already unambiguous. Append `mode=lite` for a cheaper, single-review-round run.
+argument-hint: A fully-specified request — normally the handoff from /brainstorm, but can be invoked directly if the request is already unambiguous. Add `mode=lite` for a cheaper single-review-round run, `mode=full` for the full 3-round pass, or `--all` to force all 8 specialists.
 ---
 
 # orchestrator — Route, Review, Reconcile, Decompose, Execute, Integrate
@@ -19,7 +19,9 @@ Input: $ARGUMENTS
 1. **Pick a run id**: `YYYY-MM-DD-<4 random hex>`, e.g. `2026-08-21-a3f9`.
 2. **Create the run directory** `.dag/runs/<run-id>/` and write `request.md` containing the
    verbatim request plus `brainstorm`'s stated assumptions.
-3. **Determine the mode.** Default is `full`. If `$ARGUMENTS` contains `mode=lite`, use `lite`.
+3. **Determine the mode.** If `$ARGUMENTS` contains `mode=lite`, use `lite`; if it contains
+   `mode=full`, use `full`. With neither, use whatever mode `brainstorm` chose in its handoff,
+   and fall back to `full` if you were invoked directly with no mode at all.
 
 | | `full` (default) | `lite` |
 |---|---|---|

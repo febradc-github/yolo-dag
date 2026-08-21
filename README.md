@@ -75,17 +75,49 @@ at the furthest completed phase instead of starting over.
 
 ## Modes
 
-| | `full` (default) | `lite` |
+A run is either `full` or `lite`. They differ in how much scrutiny the request gets, and
+therefore in what it costs:
+
+| | `full` | `lite` |
 |---|---|---|
 | Specialists | all routing selects | routing, capped at 4 |
 | Review rounds | up to 3 | 1 |
-| Wave width | 10 | 5 |
-| Soft spawn budget | 120 | 40 |
+| Wave width | 10 tasks | 5 tasks |
+| Soft spawn budget | 120 agents | 40 agents |
 
-`/brainstorm mode=lite <request>` for small, well-understood work. `--all` forces all eight
-specialists and skips the routing judgment. When a run crosses its spawn budget the orchestrator
-degrades — fewer review rounds, then a narrower specialist set, then narrower waves — and says
-what it dropped, rather than silently overspending or stopping halfway.
+### Passing a mode
+
+Put the flag anywhere in the request — the start reads most clearly. It's stripped from the
+request text before the specialists see it.
+
+```
+/brainstorm mode=lite fix the typo in the onboarding email copy
+/brainstorm mode=full add SSO to the admin console
+/brainstorm --all rewrite the billing service
+```
+
+- **`mode=lite`** — one review round, at most 4 specialists. For small, well-understood, low-risk
+  work where a full adversarial pass is overkill.
+- **`mode=full`** — every routed specialist, up to 3 review rounds each. For real features,
+  anything touching architecture or data, anything you'd want a second opinion on.
+- **`--all`** — forces all eight specialists and skips the routing judgment entirely. Combines
+  with either mode. Reach for it when you think routing will wrongly skip a domain that matters.
+
+### If you pass nothing
+
+`/brainstorm <request>` sizes the run itself from the shape of the request and tells you which
+mode it picked. That's the intended path — the flags exist for when you know something about the
+stakes that the request text doesn't carry, and an explicit flag always beats the model's own
+judgment.
+
+There is no separate "default" mode to memorize: unflagged runs get whichever of the two fits.
+
+### Budget degradation
+
+When a run crosses its spawn budget the orchestrator degrades rather than silently overspending
+or stopping halfway: fewer review rounds first, then a narrower specialist set, then narrower
+waves — and it says what it dropped. A `lite` run that turns out to be bigger than it looked
+degrades within `lite`; it does not quietly become a `full` run.
 
 Agents declare their own model tier: `spec-consolidator` runs on Haiku (it deduplicates and ranks
 a list someone else wrote), `task-reviewer` on Sonnet (it checks explicit criteria against a
