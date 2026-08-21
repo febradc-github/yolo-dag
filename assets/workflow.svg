@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1070" width="1560" height="1070" role="img" aria-labelledby="title desc">
+  <title id="title">yolo-dag workflow</title>
+  <desc id="desc">brainstorm resolves ambiguity and hands off to the orchestrator, which fans out to 8 domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables into one build spec, decomposes it into independent tasks, then executes and verifies them in a bounded retry loop.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#726d7d"/>
+    </marker>
+    <marker id="arrowTeal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5fb0a6"/>
+    </marker>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1560" height="1070" fill="#1c1a20"/>
+
+  <!-- Stage A: brainstorm -->
+  <rect x="650" y="40" width="260" height="76" rx="14" fill="#242229" stroke="#e2a33f" stroke-width="2" filter="url(#soft)"/>
+  <text x="780" y="76" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="600" fill="#e2a33f">/brainstorm</text>
+  <text x="780" y="100" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9d978c">entrypoint &#183; resolves ambiguity</text>
+
+  <!-- Fan-out lines -->
+  <line x1="780" y1="116" x2="780" y2="150" stroke="#726d7d" stroke-width="2"/>
+  <text x="780" y="140" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-style="italic" fill="#9d978c">fan-out &#8594; 8 specialists in parallel</text>
+  <line x1="125.5" y1="150" x2="1434.5" y2="150" stroke="#726d7d" stroke-width="2"/>
+  <line x1="125.5" y1="150" x2="125.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="312.5" y1="150" x2="312.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="499.5" y1="150" x2="499.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="686.5" y1="150" x2="686.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="873.5" y1="150" x2="873.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1060.5" y1="150" x2="1060.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1247.5" y1="150" x2="1247.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1434.5" y1="150" x2="1434.5" y2="194" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 8 specialist chips -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#ece7dc" text-anchor="middle">
+    <g filter="url(#soft)">
+      <rect x="40" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="227" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="414" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="601" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="788" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="975" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="1162" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+      <rect x="1349" y="196" width="171" height="64" rx="10" fill="#2c2a33" stroke="#4a4653" stroke-width="1.25"/>
+    </g>
+    <text x="125.5" y="232">Design</text>
+    <text x="312.5" y="232">Architecture</text>
+    <text x="499.5" y="232">Research</text>
+    <text x="686.5" y="232">Security</text>
+    <text x="873.5" y="232">Test Planning</text>
+    <text x="1060.5" y="232">Cost Estimation</text>
+    <text x="1247.5" y="232">UX Copy</text>
+    <text x="1434.5" y="232">Data &amp; Schema</text>
+  </g>
+
+  <!-- Fan-in to review band -->
+  <line x1="125.5" y1="260" x2="125.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="312.5" y1="260" x2="312.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="499.5" y1="260" x2="499.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="686.5" y1="260" x2="686.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="873.5" y1="260" x2="873.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1060.5" y1="260" x2="1060.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1247.5" y1="260" x2="1247.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1434.5" y1="260" x2="1434.5" y2="298" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Review loop band -->
+  <rect x="40" y="300" width="1480" height="140" rx="16" fill="#26242c" stroke="#5fb0a6" stroke-width="2" stroke-dasharray="7 6" filter="url(#soft)"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="80" y="340" font-size="16" font-weight="600" fill="#ece7dc">adversarial review, per specialist</text>
+    <text x="80" y="364" font-size="13" fill="#9d978c">3 independent reviewers + 1 consolidator per round</text>
+    <text x="80" y="384" font-size="13" fill="#9d978c">specialist accepts valid findings, pushes back on the rest</text>
+  </g>
+  <path d="M1369.9 384.7 A26 26 0 1 1 1369.9 351.3" stroke="#5fb0a6" stroke-width="3" fill="none" marker-end="url(#arrowTeal)"/>
+  <text x="1350" y="412" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5fb0a6">up to 3 rounds</text>
+
+  <!-- Fan-in / merge -->
+  <line x1="780" y1="440" x2="780" y2="468" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="800" y="456" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-style="italic" fill="#9d978c">fan-in</text>
+
+  <!-- Stage D: merge -->
+  <rect x="630" y="470" width="300" height="76" rx="14" fill="#242229" stroke="#726d7d" stroke-width="1.5" filter="url(#soft)"/>
+  <text x="780" y="504" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="600" fill="#ece7dc">merge</text>
+  <text x="780" y="528" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">8 deliverables &#8594; one build spec (+ open concerns)</text>
+
+  <line x1="780" y1="546" x2="780" y2="584" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Stage E: task decomposition -->
+  <rect x="610" y="586" width="340" height="76" rx="14" fill="#242229" stroke="#726d7d" stroke-width="1.5" filter="url(#soft)"/>
+  <text x="780" y="618" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#ece7dc">task-specialist</text>
+  <text x="780" y="642" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">decompose spec &#8594; independent tasks (no cross-deps)</text>
+
+  <line x1="780" y1="662" x2="780" y2="700" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Execute & verify loop band -->
+  <rect x="380" y="702" width="800" height="160" rx="16" fill="#26242c" stroke="#5fb0a6" stroke-width="2" stroke-dasharray="7 6" filter="url(#soft)"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="420" y="744" font-size="16" font-weight="600" fill="#ece7dc">execute &amp; verify</text>
+    <text x="420" y="768" font-size="13" fill="#9d978c">worker implements &#8594; reviewer checks acceptance criteria</text>
+    <text x="420" y="788" font-size="13" fill="#9d978c">flagged task reassigned to a fresh worker</text>
+    <text x="420" y="808" font-size="13" fill="#9d978c">up to 10 tasks in parallel; repeats until list is empty</text>
+  </g>
+  <g>
+    <rect x="420" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="440" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="460" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="480" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="500" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="520" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="540" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="560" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="580" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+    <rect x="600" y="824" width="14" height="14" rx="3" fill="none" stroke="#e2a33f" stroke-width="1.5"/>
+  </g>
+  <text x="628" y="835" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">&#215;10 parallel task slots</text>
+
+  <path d="M1099.9 774.7 A26 26 0 1 1 1099.9 741.3" stroke="#5fb0a6" stroke-width="3" fill="none" marker-end="url(#arrowTeal)"/>
+  <text x="1080" y="802" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5fb0a6">&#8804; 3 attempts</text>
+
+  <line x1="780" y1="862" x2="780" y2="900" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Stage G: done -->
+  <rect x="680" y="902" width="200" height="68" rx="14" fill="#242229" stroke="#e2a33f" stroke-width="2" filter="url(#soft)"/>
+  <text x="780" y="932" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#e2a33f">done</text>
+  <text x="780" y="954" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">tasks executed &amp; verified</text>
+
+  <!-- Legend -->
+  <text x="780" y="1010" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c"><tspan fill="#726d7d" font-weight="700">&#8594;</tspan> one-way flow (DAG edge) &#160;&#160;&#160;&#160;&#160;&#160; <tspan fill="#5fb0a6" font-weight="700">&#8635;</tspan> bounded loop (capped rounds / attempts)</text>
+</svg>

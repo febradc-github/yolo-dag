@@ -1,0 +1,11 @@
+{
+  "name": "yolo-dag",
+  "owner": { "name": "Dan Febra", "email": "febra.dc@gmail.com", "url": "https://github.com/febradc-github/yolo-dag" },
+  "plugins": [
+    {
+      "name": "yolo-dag",
+      "source": "./",
+      "description": "Turns an ambiguous request into reviewed, independent, executable tasks: /brainstorm resolves ambiguity, then the orchestrator runs an 8-specialist parallel fan-out, per-specialist review loops, task decomposition, and batched execute/verify cycles."
+    }
+  ]
+}
