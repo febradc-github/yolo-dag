@@ -1,0 +1,7 @@
+name: integration-conflict
+description: Phase 6 detects two same-wave tasks editing one file and resolves via integration-mode rework rather than losing a side.
+runs: 3
+tags: [medium, phase-6]
+max_turns: 60
+timeout_seconds: 1200
+scaffold_script: scaffold.sh

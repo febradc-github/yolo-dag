@@ -5,7 +5,7 @@
     {
       "name": "yolo-dag",
       "source": "./",
-      "description": "Turns an ambiguous request into reviewed, independent, executable tasks: /brainstorm resolves ambiguity, then the orchestrator runs an 8-specialist parallel fan-out, per-specialist review loops, task decomposition, and batched execute/verify cycles."
+      "description": "Turns an ambiguous request into a reviewed, executed, integrated branch: /brainstorm resolves ambiguity, then the orchestrator routes to the relevant specialists, runs per-specialist review loops, reconciles cross-specialist contradictions, decomposes into a task DAG, executes it in topological waves, and integrates the result onto one branch."
     }
   ]
 }

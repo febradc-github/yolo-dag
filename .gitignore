@@ -1,0 +1,9 @@
+# Pipeline run state. Per-run artifacts are local working data, not repo content —
+# /dag-status and /dag-resume read them from disk, nothing else needs them versioned.
+.dag/
+
+# Eval output
+evals/results/
+
+# macOS
+.DS_Store

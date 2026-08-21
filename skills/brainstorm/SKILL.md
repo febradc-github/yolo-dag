@@ -1,6 +1,6 @@
 ---
 description: Entrypoint for the yolo-dag plugin — turns a raw, possibly ambiguous request into a fully-specified one, resolving ambiguity autonomously and asking the user only when a decision is genuinely high-stakes, then hands off to the orchestrator skill to actually build it.
-argument-hint: The request to run through the pipeline
+argument-hint: The request to run through the pipeline. Append `mode=lite` for a cheaper single-review-round run, or `--all` to force all 8 specialists.
 ---
 
 # /brainstorm — Resolve the Request, Then Hand Off
@@ -39,9 +39,24 @@ materially changes scope, or touches security/data in a way that's hard to walk 
    for anything you decided yourself in step 2 — visible and easy to correct if you guessed
    wrong, without having required an answer to reach this point.
 
+## Sizing the run
+
+The orchestrator runs in one of two modes, and picking the wrong one wastes either money or
+quality. Pass the mode through in your handoff:
+
+- **`full`** (default) — every routed specialist, up to 3 review rounds each. Right for real
+  features, anything touching architecture or data, anything you'd want a second opinion on.
+- **`mode=lite`** — routing capped at 4 specialists, 1 review round, narrower execution waves.
+  Right for small, well-understood, low-risk work where a full adversarial pass is overkill.
+
+Choose it yourself from the shape of the request rather than asking, and say which you picked in
+one clause. If the user explicitly passed `mode=lite` or `--all` in `$ARGUMENTS`, honour that
+over your own judgment and pass the flag straight through.
+
 ## Hand off
 
 Immediately after the restatement, invoke the `orchestrator` skill via the `Skill` tool, passing
-the fully-specified request (plus the stated assumptions) as its argument. Do not attempt any of
-the orchestrator's work yourself — fan-out, review loops, merging, decomposition, and execution
-all live in that skill. Your job ends at a clean handoff.
+the fully-specified request (plus the stated assumptions, plus the mode) as its argument. Do not
+attempt any of the orchestrator's work yourself — routing, fan-out, review loops, merging,
+reconciliation, decomposition, execution, and integration all live in that skill. Your job ends
+at a clean handoff.

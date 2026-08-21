@@ -1,0 +1,6 @@
+name: decomposition
+description: Phase 4 emits a valid acyclic task graph with real dependency edges rather than folding ordered work into oversized tasks.
+runs: 3
+tags: [cheap, phase-4]
+max_turns: 40
+timeout_seconds: 900
