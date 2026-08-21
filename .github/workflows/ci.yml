@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate plugin structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No dependencies by design — the validator runs on a bare interpreter so this
+      # job stays fast and can't break on a transitive package update.
+      - name: Validate manifests, agents, commands, and skills
+        run: python3 scripts/validate.py
+
+      - name: Check JSON files parse
+        run: |
+          for f in $(git ls-files '*.json'); do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f" || exit 1
+          done

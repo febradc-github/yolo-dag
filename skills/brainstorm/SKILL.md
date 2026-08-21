@@ -1,6 +1,6 @@
 ---
 description: Entrypoint for the yolo-dag plugin — turns a raw, possibly ambiguous request into a fully-specified one, resolving ambiguity autonomously and asking the user only when a decision is genuinely high-stakes, then hands off to the orchestrator skill to actually build it.
-argument-hint: The request to run through the pipeline
+argument-hint: The request to run through the pipeline. Add `mode=lite` for a cheaper single-review-round run, `mode=full` to force the full 3-round pass, `mode=micro` to skip the specialist phases entirely for small unambiguous work, `--all` to force all 8 specialists, or `--plan-only` to stop after the task graph. With no mode flag, the run is sized automatically.
 ---
 
 # /brainstorm — Resolve the Request, Then Hand Off
@@ -39,9 +39,50 @@ materially changes scope, or touches security/data in a way that's hard to walk 
    for anything you decided yourself in step 2 — visible and easy to correct if you guessed
    wrong, without having required an answer to reach this point.
 
+## Sizing the run
+
+The orchestrator runs in one of three modes, and picking the wrong one wastes either money or
+quality. Pass the mode through in your handoff:
+
+| | `full` | `lite` | `micro` |
+|---|---|---|---|
+| Phases | all six | all six | 4–6 only |
+| Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
+| Review rounds | up to 3 | 1 | none |
+| Concurrent tasks | 10 | 5 | 2 |
+| Soft spawn budget | 120 units | 40 units | 8 units |
+
+- **`mode=full`** — every routed specialist, up to 3 review rounds each. Right for real features,
+  anything touching architecture or data, anything you'd want a second opinion on. This is also
+  the fallback when the request genuinely doesn't tell you which way to go: over-reviewing costs
+  money, under-reviewing costs correctness.
+- **`mode=lite`** — routing capped at 4 specialists, 1 review round, fewer concurrent tasks.
+  Right for small, well-understood, moderately-scoped work where a full adversarial pass is
+  overkill but the request still deserves a spec.
+- **`mode=micro`** — no specialists, no spec review: the request goes straight to task
+  decomposition and execution, a handful of agents in total. Right for work that is *already*
+  fully specified by its own one-sentence statement — a typo fix, a rename, a config value, a
+  single obvious test. If you had to resolve any real ambiguity in step 2, it isn't micro.
+
+`--all` is separate from the mode and forces all 8 specialists, skipping the routing judgment in
+Phase 1. It combines with `full` or `lite`; it is incompatible with `micro` (which has no
+specialist phase). `--plan-only` is also separate: it makes the orchestrator stop cleanly after
+the task graph so the user can review the plan and execute later with `/dag-resume` — pass it
+through untouched.
+
+Choose the mode yourself from the shape of the request rather than asking, and say which you
+picked in one clause.
+
+**An explicit flag in `$ARGUMENTS` overrides your judgment.** If the user passed `mode=lite`,
+`mode=full`, `mode=micro`, `--all`, or `--plan-only`, honour it and pass it straight through —
+including `mode=full` on a request you'd have sized as `micro` yourself. They know something
+about the stakes that the request text doesn't carry. Strip the flag from the request text you
+restate, so it doesn't leak into the specialists' prompts as if it were part of the requirement.
+
 ## Hand off
 
 Immediately after the restatement, invoke the `orchestrator` skill via the `Skill` tool, passing
-the fully-specified request (plus the stated assumptions) as its argument. Do not attempt any of
-the orchestrator's work yourself — fan-out, review loops, merging, decomposition, and execution
-all live in that skill. Your job ends at a clean handoff.
+the fully-specified request (plus the stated assumptions, plus the mode) as its argument. Do not
+attempt any of the orchestrator's work yourself — routing, fan-out, review loops, merging,
+reconciliation, decomposition, execution, and integration all live in that skill. Your job ends
+at a clean handoff.

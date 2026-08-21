@@ -1,0 +1,6 @@
+name: routing
+description: Phase 1 routing selects only the specialists whose domains the request actually touches.
+runs: 3
+tags: [cheap, phase-1]
+max_turns: 30
+timeout_seconds: 600

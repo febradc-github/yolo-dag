@@ -1,0 +1,7 @@
+name: cycle-rejection
+description: A resumed run finds a cyclic tasks.json on disk — the orchestrator must bounce it back to task-specialist, never execute it and never silently drop an edge.
+runs: 3
+tags: [cheap, phase-5, negative]
+max_turns: 40
+timeout_seconds: 900
+scaffold_script: scaffold.sh

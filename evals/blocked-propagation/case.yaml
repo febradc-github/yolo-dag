@@ -1,0 +1,7 @@
+name: blocked-propagation
+description: A task already at its retry cap must stay BLOCKED, its dependent must be SKIPPED without ever running, and an unrelated ready task must still execute and merge.
+runs: 3
+tags: [cheap, phase-5, negative]
+max_turns: 50
+timeout_seconds: 1200
+scaffold_script: scaffold.sh

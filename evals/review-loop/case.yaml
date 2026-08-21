@@ -1,0 +1,6 @@
+name: review-loop
+description: Phase 2 reviewers find a planted flaw, emit the REVIEW status-line contract, and the specialist actually revises rather than deflecting.
+runs: 3
+tags: [medium, phase-2]
+max_turns: 40
+timeout_seconds: 900

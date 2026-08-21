@@ -1,9 +1,10 @@
 {
   "name": "yolo-dag",
-  "version": "0.1.0",
-  "description": "Turns an ambiguous request into reviewed, independent, executable tasks: /brainstorm resolves ambiguity (autonomously, asking only when high-stakes) then hands off to the orchestrator, which fans out 8 parallel specialists each closed by a 3-reviewer/1-consolidator review loop, merges into one build spec, decomposes it into dependency-free tasks, then executes and verifies them in worker/reviewer batches of 10.",
+  "version": "0.3.0",
+  "description": "Turns an ambiguous request into a reviewed, executed, integrated branch: /brainstorm resolves ambiguity (autonomously, asking only when high-stakes) then hands off to the orchestrator, which routes to the relevant domain specialists, closes each with a 3-reviewer/1-consolidator review loop, merges and reconciles them into one build spec, decomposes it into a task DAG, executes that DAG with a ready-queue of worktree-isolated workers — merging each passing task onto the run's integration branch as it lands — and finishes with a whole-suite run plus an acceptance review of the assembled diff against the original request. Every phase persists to .dag/runs/<run-id>/ so an interrupted run resumes instead of restarting.",
   "author": { "name": "Dan Febra", "email": "febra.dc@gmail.com" },
   "repository": "https://github.com/febradc-github/yolo-dag",
-  "license": "UNLICENSED",
-  "keywords": ["multi-agent", "orchestration", "pipeline", "code-review", "task-decomposition", "parallel-agents"]
+  "homepage": "https://github.com/febradc-github/yolo-dag#readme",
+  "license": "MIT",
+  "keywords": ["multi-agent", "orchestration", "pipeline", "dag", "code-review", "task-decomposition", "parallel-agents"]
 }
