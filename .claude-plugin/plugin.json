@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Turns an ambiguous request into reviewed, independent, executable tasks: /brainstorm resolves ambiguity (autonomously, asking only when high-stakes) then hands off to the orchestrator, which fans out 8 parallel specialists each closed by a 3-reviewer/1-consolidator review loop, merges into one build spec, decomposes it into dependency-free tasks, then executes and verifies them in worker/reviewer batches of 10.",
   "author": { "name": "Dan Febra", "email": "febra.dc@gmail.com" },
-  "repository": { "type": "git", "url": "git+https://github.com/febradc-github/yolo-dag.git" },
+  "repository": "https://github.com/febradc-github/yolo-dag",
   "license": "UNLICENSED",
   "keywords": ["multi-agent", "orchestration", "pipeline", "code-review", "task-decomposition", "parallel-agents"]
 }
