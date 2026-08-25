@@ -4,7 +4,7 @@ A Claude Code plugin that turns an ambiguous request into a reviewed, executed, 
 — structured as a directed graph of agent nodes rather than a linear script (see "Design: a DAG
 with bounded loops" below).
 
-![yolo-dag workflow: /brainstorm sizes the run and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into a task DAG, executes that DAG with a ready-queue that merges each passing task onto the integration branch as it lands, then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.gif)
+![yolo-dag workflow: /brainstorm sizes the run and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into a task DAG, executes that DAG in user-paced batches — pausing to ask how many tasks to dispatch next and merging each passing task onto the integration branch as its batch resolves — then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.gif)
 
 ## Workflow
 
@@ -39,15 +39,18 @@ The orchestrator then runs six phases:
 4. **Decompose** — `task-specialist` breaks the merged spec into a task DAG: tasks with explicit
    `depends_on` edges, checkable acceptance criteria, and a declared file footprint. The
    orchestrator validates the graph is acyclic and reports its shape.
-5. **Execute, verify & merge** — a ready-queue, not a batch job: the run's `dag/<run-id>`
-   integration branch is created first, each worker implements in an isolated worktree cut from
-   the branch's current tip, and a task is dispatched the moment its dependencies have merged —
-   so a dependent's tree literally contains its dependencies' finished code, not a prose summary
-   of it. Workers report where their work lives via a machine trailer (worktree, commit sha,
-   blocker class); reviewers verify inside that worktree against the task's own acceptance
-   criteria; flagged tasks get a fresh worker (3 attempts, then BLOCKED, dependents SKIPPED);
-   passing tasks merge onto the branch immediately, with merge conflicts reworked by a fresh
-   worker on top of the integrated code rather than resolved silently.
+5. **Execute, verify & merge** — user-paced batches, not a continuous ready-queue: the run's
+   `dag/<run-id>` integration branch is created first, then before every batch the orchestrator
+   pauses and asks how many ready tasks to dispatch next (so a review pass covers one bounded
+   batch instead of the whole DAG landing at once). Each worker implements in an isolated worktree
+   cut from the branch's current tip, so a dependent's tree literally contains its dependencies'
+   finished code, not a prose summary of it. Workers report where their work lives via a machine
+   trailer (worktree, commit sha, blocker class); reviewers verify inside that worktree against the
+   task's own acceptance criteria; flagged tasks get a fresh worker (3 attempts, then BLOCKED,
+   dependents SKIPPED); passing tasks merge onto the branch immediately, with merge conflicts
+   reworked by a fresh worker on top of the integrated code rather than resolved silently. The
+   batch is only closed — and the next pause offered — once every task dispatched into it,
+   retries included, reaches a terminal state.
 6. **Verify & hand off** — runs the suite once against the assembled branch (individually-passing
    tasks can still be collectively broken), then a final acceptance review compares the *whole
    diff* against the merged spec and the original request — the only point in the pipeline where
@@ -117,8 +120,11 @@ therefore in what it costs:
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Concurrent tasks | 10 | 5 | 2 |
+| Batch-size ceiling | 10 | 5 | 2 |
 | Soft spawn budget | 120 units | 40 units | 8 units |
+
+The batch-size ceiling caps what the per-batch dispatch prompt in Phase 5 will offer or accept —
+the user picks the actual number at each pause.
 
 ### Passing a mode
 
@@ -165,7 +171,7 @@ The budget is cost-weighted — a session-model spawn counts 1.0 units, Sonnet 0
 computed from the spawn ledger in `run.json`, never from the orchestrator's memory of it (a
 compacted context forgets spawns, and that drift is silent overspend). When a run crosses its
 ceiling the orchestrator degrades rather than silently overspending or stopping halfway: fewer
-review rounds first, then a narrower specialist set, then fewer concurrent tasks — and it says
+review rounds first, then a narrower specialist set, then a lower batch-size ceiling — and it says
 what it dropped. A `lite` run that turns out to be bigger than it looked degrades within `lite`;
 it does not quietly become a `full` run.
 
@@ -187,13 +193,15 @@ in parallel (anything with no unresolved edges pointing into it).
 
 - **Fan-out/fan-in** happens twice: the specialists converge at Merge (Phase 3), and within each
   specialist's review round, the 3 reviewers converge at the consolidator.
-- **The task layer is a real DAG, scheduled like one.** `task-specialist` emits tasks with
-  explicit `depends_on` edges; the orchestrator validates acyclicity via topological levels
-  ("waves" — still how a run's shape is reported), then executes with a **ready-queue**: a task
-  dispatches the moment its dependencies are merged and a slot is free, critical path first,
-  rather than the whole level waiting on its slowest member. Edges are made real by continuous
-  integration — a dependent's worktree is cut from the integration branch after its dependencies
-  landed, so it builds on their actual code.
+- **The task layer is a real DAG, scheduled in user-paced batches.** `task-specialist` emits tasks
+  with explicit `depends_on` edges; the orchestrator validates acyclicity via topological levels
+  ("waves" — still how a run's shape is reported), then executes in batches: before each one it
+  asks how many of the currently-ready tasks to dispatch, critical path first, and won't dispatch
+  the next batch until every task in the current one — retries included — has reached a terminal
+  state. That keeps a review pass scoped to one batch instead of the whole DAG landing at once.
+  Edges are still made real by continuous integration within a batch — a dependent's worktree is
+  cut from the integration branch after its dependencies landed, so it builds on their actual
+  code.
 - **The review loop (up to 3 rounds) and the retry loop (up to 3 attempts) are the one place this
   isn't a pure DAG.** A strict DAG can't have cycles — resuming a specialist or reassigning a
   flagged task is cyclic control flow. In practice it behaves like a *bounded, unrolled* DAG:

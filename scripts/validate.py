@@ -78,7 +78,7 @@ MODE_TABLE_FILES = [
     "skills/brainstorm/SKILL.md",
     "skills/orchestrator/SKILL.md",
 ]
-MODE_ROW_LABELS = {"Phases", "Specialists", "Review rounds", "Concurrent tasks",
+MODE_ROW_LABELS = {"Phases", "Specialists", "Review rounds", "Batch-size ceiling",
                    "Soft spawn budget"}
 
 # Keys the orchestrator writes to run.json. The commands read this file; a command reading

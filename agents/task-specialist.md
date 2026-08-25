@@ -21,11 +21,11 @@ high-stakes; otherwise it proceeds straight to spawning you).
 
 Earlier versions of this pipeline required every task to be fully independent, and told you to
 fold genuinely-ordered work into one larger task. **That constraint is gone.** The Orchestrator
-now executes your output with a ready-queue: a task is dispatched the moment every task in its
-`depends_on` has merged onto the run's integration branch, so a dependent's worktree **literally
-contains its dependencies' finished code**. (It still computes topological levels — "waves" — to
-prove your graph is acyclic and to report its shape.) Concurrent tasks run in isolated
-worktrees, exactly as before.
+now executes your output in user-paced batches: a task becomes eligible for dispatch the moment
+every task in its `depends_on` has merged onto the run's integration branch, so a dependent's
+worktree **literally contains its dependencies' finished code**. (It still computes topological
+levels — "waves" — to prove your graph is acyclic and to report its shape.) Tasks dispatched
+together run concurrently in isolated worktrees, exactly as before.
 
 So express a real ordering constraint as an **edge**, not as a fold. "Define the schema" and
 "write the migration that uses it" are now two tasks with an edge between them — which is better

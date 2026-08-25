@@ -39,9 +39,10 @@ completed phase, and continues. The rules that matter on a resume:
   on disk can have been hand-edited or corrupted since it was written, and a cycle must be
   bounced back to `task-specialist`, never executed and never silently de-edged.
 - **Tasks already MERGED do not re-run.** The integration branch is authoritative for what has
-  landed: a resume into Phase 5 checks out `dag/<run-id>` and continues dispatching from the
-  ready-queue. If `tasks.json` claims MERGED work but the branch is missing, report the
-  inconsistency and stop rather than guessing.
+  landed: a resume into Phase 5 checks out `dag/<run-id>`, recomputes the ready set, and pauses to
+  ask the user how many tasks to dispatch in the next batch, same as any other batch boundary. If
+  `tasks.json` claims MERGED work but the branch is missing, report the inconsistency and stop
+  rather than guessing.
 - Tasks marked `running` by a dead or cancelled session are re-dispatched from `pending` — a
   worker that never reported produced nothing mergeable.
 - **A `--plan-only` run resumes into Phase 5.** The resume *is* the user's approval to execute

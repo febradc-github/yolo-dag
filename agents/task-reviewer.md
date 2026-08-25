@@ -1,6 +1,6 @@
 ---
 name: task-reviewer
-description: Use this agent when a task-worker has finished one task from the Phase 5 ready-queue and its output needs checking against that task's own acceptance criteria before the Orchestrator merges it onto the integration branch. Given the worker's WORKTREE path and COMMIT sha and verifies inside that worktree — the changes do not exist in the main working tree. Spawned once per finished task, many concurrently. Not for reviewing Phase 1 specialist deliverables (see spec-reviewer), not for reviewing the assembled branch against the request (see integration-reviewer), and not for executing or re-executing a task (see task-worker).
+description: Use this agent when a task-worker has finished one task from a Phase 5 batch and its output needs checking against that task's own acceptance criteria before the Orchestrator merges it onto the integration branch. Given the worker's WORKTREE path and COMMIT sha and verifies inside that worktree — the changes do not exist in the main working tree. Spawned once per finished task, many concurrently. Not for reviewing Phase 1 specialist deliverables (see spec-reviewer), not for reviewing the assembled branch against the request (see integration-reviewer), and not for executing or re-executing a task (see task-worker).
 model: sonnet
 color: red
 tools: ["Read", "Grep", "Glob", "Bash", "ReportFindings"]
@@ -15,8 +15,8 @@ excusing a criterion it didn't meet) is a mistake.
 
 ## When to invoke
 
-Phase 5 of the `orchestrator` skill, spawned once per finished task, up to 10 concurrently,
-immediately after the corresponding `task-worker` reports done.
+Phase 5 of the `orchestrator` skill, spawned once per finished task — up to the current batch's
+size concurrently — once the whole batch of `task-worker`s it belongs to has reported done.
 
 ## Where the work is
 

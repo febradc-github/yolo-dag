@@ -1,5 +1,5 @@
 ---
-description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally handed off from the brainstorm skill), routes it to the relevant domain specialists, runs each through a 3-reviewer/1-consolidator review loop, merges and reconciles the results into one build spec, decomposes it into a task DAG, executes that DAG with a ready-queue of worktree-isolated workers — merging each passing task onto the run's integration branch as it lands — then verifies and acceptance-reviews the assembled branch. Persists every phase to .dag/runs/<run-id>/ (including a machine-readable run.json) so an interrupted run can resume.
+description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally handed off from the brainstorm skill), routes it to the relevant domain specialists, runs each through a 3-reviewer/1-consolidator review loop, merges and reconciles the results into one build spec, decomposes it into a task DAG, executes that DAG in user-paced batches of worktree-isolated workers — pausing before each batch to ask how many to dispatch, and waiting for the whole batch to finish and merge before asking again — then verifies and acceptance-reviews the assembled branch. Persists every phase to .dag/runs/<run-id>/ (including a machine-readable run.json) so an interrupted run can resume.
 argument-hint: A fully-specified request — normally the handoff from /brainstorm, but can be invoked directly if the request is already unambiguous. Add `mode=lite` for a cheaper single-review-round run, `mode=full` for the full 3-round pass, `mode=micro` to skip the specialist phases entirely (the request is the spec), `--all` to force all 8 specialists, or `--plan-only` to stop cleanly after the task graph and let /dag-resume execute it later.
 ---
 
@@ -9,9 +9,10 @@ You receive a request that has already been resolved to zero high-stakes ambigui
 handed off by the `brainstorm` skill, whose restated request and stated assumptions you should
 treat as ground truth; don't re-litigate them. Take it through six phases: route it to the
 specialists whose domains actually apply, let each survive an adversarial review loop, merge and
-reconcile them into one build spec, decompose that spec into a task DAG, execute that DAG with a
-ready-queue of worktree-isolated workers — merging each passing task onto the run's integration
-branch the moment it passes review — then verify and acceptance-review the assembled branch.
+reconcile them into one build spec, decompose that spec into a task DAG, execute that DAG in
+user-paced batches of worktree-isolated workers — pausing before each batch to ask how many to
+dispatch, merging each passing task onto the run's integration branch as its batch resolves —
+then verify and acceptance-review the assembled branch.
 
 Input: $ARGUMENTS
 
@@ -47,8 +48,11 @@ Input: $ARGUMENTS
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Concurrent tasks | 10 | 5 | 2 |
+| Batch-size ceiling | 10 | 5 | 2 |
 | Soft spawn budget | 120 units | 40 units | 8 units |
+
+"Batch-size ceiling" is the largest batch the per-pause prompt in Phase 5 will ever offer or
+accept, not a live concurrency target — the user picks the actual number at each pause.
 
 5. **Write `run.json`** to the run directory — the machine-readable manifest every command and
    every resume branches on. The markdown artifacts are the human surface; `run.json` is the
@@ -92,7 +96,8 @@ inconsistency and stop rather than guessing.
   how to degrade when a budget is tight. Only interrupt the user when a decision is genuinely
   high-stakes (irreversible, expensive, materially changes scope, or touches security/data in a
   way that's hard to walk back). State assumptions plainly wherever they show up rather than
-  pausing to get them rubber-stamped.
+  pausing to get them rubber-stamped. The one standing exception is Phase 5's per-batch dispatch
+  prompt — that pause is deliberate and happens on every batch regardless of stakes.
 - **All spawning happens from this skill.** No agent defined in this plugin has `Agent` in its
   own `tools` — every specialist, reviewer, consolidator, reconciler, worker, and the
   task-specialist is spawned directly by you, the main thread running this skill. This is
@@ -136,7 +141,8 @@ Unit weights: session-model (`inherit`) spawn = **1.0**, `sonnet` = **0.5**, `ha
 
 When a run crosses the mode's soft budget, **degrade rather than stop or silently overspend**,
 in this order: drop remaining review rounds to 1, then narrow any not-yet-started specialists to
-the always-on three, then reduce concurrent tasks. Record each degradation in `run.json`'s
+the always-on three, then lower the Phase 5 batch-size ceiling offered at each pause. Record each
+degradation in `run.json`'s
 `degradations` array and say what you dropped and why in one line. Only stop outright if
 degrading everything still won't fit, and say so plainly rather than producing a half-run you
 present as complete.
@@ -273,7 +279,8 @@ yourself by dropping an edge at random.
 Then compute the **topological levels** ("waves") — level 0 is every task with
 `depends_on: []`; level *n* is every task whose dependencies all sit in levels `< n`. Levels are
 the proof of acyclicity and the reporting shape ("14 tasks in 4 waves: 6, 5, 2, 1" — report that
-line to the user); the actual scheduling in Phase 5 is a ready-queue, which is strictly better.
+line to the user); the actual scheduling in Phase 5 is a user-paced batch loop over the ready set,
+not a strict wave-by-wave walk.
 
 Warn — don't block — if two tasks that can be ready at the same time declare overlapping `files`.
 
@@ -283,33 +290,46 @@ spec's location, the task graph and its shape, and any Open Concerns; leave phas
 they're ready. Execution is the majority of the cost and the only part that writes code — this
 flag exists so the user can see the plan without paying for the build.
 
-## Phase 5 — Execute, verify & merge (continuously)
+## Phase 5 — Execute, verify & merge (in user-paced batches)
 
-Execution is continuous, not big-bang: each task merges onto the integration branch the moment
-it passes review. That is what makes dependency edges real — a dependent's worktree is created
-from a branch tip that already *contains* its dependencies' code, not from a prose summary of it.
+Execution proceeds one **user-sized batch** at a time, not continuously: before dispatching any
+new work, pause and ask how many workers to send out; then drive that entire batch to a terminal
+state — every worker finished, reviewed, and merged/blocked/unmerged — before asking again.
+Merging still happens per task the instant it passes review (that's what makes dependency edges
+real: a dependent's worktree is created from a branch tip that already *contains* its
+dependencies' code), but *dispatching the next batch* is gated on the current one being
+completely closed out, retries included.
 
 1. **Create the integration branch first**: `git checkout -b dag/<run-id> <base_commit>` in the
    main working tree, and record `integration_branch` in `run.json`. The main tree stays on this
    branch for the whole phase — that is the mechanism by which every worker worktree spawned from
    here is based on the branch's current tip. Never integrate onto `main` (or the repo's default
    branch) directly, and never without the user asking.
-2. **Schedule with a ready-queue.** A task is *ready* when every id in its `depends_on` is
-   MERGED. Keep up to the mode's concurrent-task cap of workers in flight; when one resolves,
-   refill from the ready set immediately. Never hold a whole-level barrier — one slow task
-   retrying must not stall unrelated ready work. When more tasks are ready than there are free
-   slots, dispatch **longest-remaining-dependency-chain first** (critical path first).
-3. **Spawn one `task-worker` per dispatched task**, `run_in_background: true`, with
+2. **Compute the ready set.** A task is *ready* when every id in its `depends_on` is MERGED. This
+   is recomputed fresh at the start of every batch — it typically grows to include tasks unlocked
+   by the batch that just closed.
+3. **Pause and ask how many workers to dispatch this batch**, via `AskUserQuestion`. Offer as
+   options whichever of `10, 5, 3, 2, 1` are ≤ both the mode's batch-size ceiling and the number
+   of currently ready tasks, and let the user type a custom number instead. If exactly one task is
+   ready, there's no real choice to offer — say so in one line, dispatch it, and skip the prompt.
+   If the user's answer exceeds the ready count or the ceiling, silently clamp to
+   `min(answer, ready count, ceiling)` and say what you clamped to and why.
+4. **Dispatch that many tasks.** When more tasks are ready than the chosen batch size, dispatch
+   **longest-remaining-dependency-chain first** (critical path first); the rest stay in the ready
+   set for the next batch.
+5. **Spawn one `task-worker` per dispatched task**, `run_in_background: true`, with
    `isolation: "worktree"`. Give each worker its task, its acceptance criteria, its declared
    `files` footprint, and the final reports of every task in its `depends_on` — noting that the
    dependencies' actual code is already present in its tree, and the reports are context, not the
    source of truth.
-4. **Read each worker's machine trailer** — the literal `WORKTREE:`, `BRANCH:`, `COMMIT:`, and
-   `BLOCKER:` lines at the end of its final message. That trailer is the only channel through
-   which the pipeline learns where the work physically is; a report without it is a report of
-   nothing.
+6. **Wait for every worker in this batch to finish before doing anything else in it** — do not
+   start reviewing or merging any of them until the whole batch has reported. As each finishes,
+   read its machine trailer — the literal `WORKTREE:`, `BRANCH:`, `COMMIT:`, and `BLOCKER:` lines
+   at the end of its final message. That trailer is the only channel through which the pipeline
+   learns where the work physically is; a report without it is a report of nothing.
    - `COMMIT: none` alongside a claim of success means the worker produced nothing (an unchanged
-     worktree is auto-cleaned) — treat it as FLAGGED and reassign; it counts as an attempt.
+     worktree is auto-cleaned) — treat it as FLAGGED and reassign within this same batch; it
+     counts as an attempt.
    - `BLOCKER: <class>` other than `none` means the worker judged the task unsatisfiable
      (`spec-defect` / `environment` / `criteria-conflict` / `unknown`). Spawn **one** fresh worker
      to independently confirm; if it reports the same blocker class, mark the task BLOCKED with
@@ -318,45 +338,50 @@ from a branch tip that already *contains* its dependencies' code, not from a pro
      isn't — the isolation mechanism gave the worker a detached copy rather than a
      shared-object worktree — fetch it in: `git fetch <worktree-path> <sha>`. If both fail, treat
      the spawn as failed under the stuck-agent rule.
-5. **Spawn each finished worker's `task-reviewer`**, `run_in_background: true`, with the task's
-   acceptance criteria, the worker's report, and — critically — the worker's `WORKTREE` path and
-   `COMMIT` sha, so it verifies the actual work (`git -C <worktree> ...`) rather than the main
-   tree, where the changes do not exist. Batch these rather than spawning one at a time as
-   workers trickle in.
-6. **Read each reviewer's verdict from the literal `VERDICT: PASS` / `VERDICT: FLAGGED` line at
+7. **Once the whole batch has reported, spawn all of their `task-reviewer`s together**,
+   `run_in_background: true`, with the task's acceptance criteria, the worker's report, and —
+   critically — the worker's `WORKTREE` path and `COMMIT` sha, so it verifies the actual work
+   (`git -C <worktree> ...`) rather than the main tree, where the changes do not exist.
+8. **Read each reviewer's verdict from the literal `VERDICT: PASS` / `VERDICT: FLAGGED` line at
    the end of its final message.** Do not branch on a `ReportFindings` tool call — that renders to
    the host UI and is not the channel you receive. If a reviewer somehow returns no verdict line,
    treat it as FLAGGED and note it.
-7. **On `VERDICT: FLAGGED`**: reassign to a **new** `task-worker` instance — never resumed via
+9. **On `VERDICT: FLAGGED`**: reassign to a **new** `task-worker` instance — never resumed via
    `SendMessage`. The point of reassignment is a fresh, unbiased attempt, not a continuation that
    might inherit the same blind spot. Pass the reviewer's findings to the new worker; its fresh
-   worktree comes off the branch's current tip. **Retry cap: 2 reassignments per task (3 attempts
-   total).** On the 3rd FLAGGED result, mark it BLOCKED and hold its accumulated findings for the
-   final summary.
-8. **On `VERDICT: PASS`, merge immediately**: `git merge --no-ff <commit>` onto `dag/<run-id>`
-   in the main tree.
-   - **Clean merge** → mark the task MERGED, then remove its worktree
-     (`git worktree remove <path>` and `git worktree prune`) — the work is on the branch; the
-     worktree is done. Cleanup is continuous, not a Phase 6 afterthought.
-   - **Conflict** → `git merge --abort`, then spawn a fresh `task-worker` in **integration
-     mode**: give it the task, its acceptance criteria, and the conflict, and have it redo the
-     task's intent on top of the branch's current tip (its fresh worktree already contains the
-     integrated code). This is a distinct retry reason from a FLAGGED review and gets its own
-     cap: **1 integration retry per task.** A second conflict → mark the task UNMERGED, *keep its
-     worktree*, and report the path — that worktree is the only copy of the work.
-9. **A BLOCKED task blocks its dependents.** Any task whose `depends_on` includes a BLOCKED (or
-   UNMERGED) task cannot run — mark it SKIPPED (not BLOCKED; it never got an attempt) and carry
-   it to the summary. Do not run a task whose dependency never landed on the branch.
-10. **Spec-defect circuit breaker.** If at any point more than half of all *attempted* tasks are
+   worktree comes off the branch's current tip. This retry happens **inside the same batch**: the
+   batch is not closed until this task also reaches a terminal state. **Retry cap: 2 reassignments
+   per task (3 attempts total).** On the 3rd FLAGGED result, mark it BLOCKED and hold its
+   accumulated findings for the final summary.
+10. **On `VERDICT: PASS`, merge immediately**: `git merge --no-ff <commit>` onto `dag/<run-id>`
+    in the main tree.
+    - **Clean merge** → mark the task MERGED, then remove its worktree
+      (`git worktree remove <path>` and `git worktree prune`) — the work is on the branch; the
+      worktree is done. Cleanup happens as each task lands, not deferred to Phase 6.
+    - **Conflict** → `git merge --abort`, then spawn a fresh `task-worker` in **integration
+      mode**: give it the task, its acceptance criteria, and the conflict, and have it redo the
+      task's intent on top of the branch's current tip (its fresh worktree already contains the
+      integrated code). This is a distinct retry reason from a FLAGGED review, also resolved
+      **within the same batch**, and gets its own cap: **1 integration retry per task.** A second
+      conflict → mark the task UNMERGED, *keep its worktree*, and report the path — that worktree
+      is the only copy of the work.
+11. **A BLOCKED task blocks its dependents.** Any task whose `depends_on` includes a BLOCKED (or
+    UNMERGED) task cannot run — mark it SKIPPED (not BLOCKED; it never got an attempt) and carry
+    it to the summary. Do not run a task whose dependency never landed on the branch.
+12. **Spec-defect circuit breaker.** If at any point more than half of all *attempted* tasks are
     BLOCKED with `BLOCKER: spec-defect`, the spec is the problem, not the workers. Pause
     dispatch and `SendMessage` the accumulated blocker reports to `task-specialist` (its Phase 4
     spawn is resumable in-session) for a corrected graph of the not-yet-merged remainder;
     re-validate it, then resume dispatch. **Strictly once per run** — the bounded-loop property
     is what keeps this pipeline a DAG.
-11. Update each task's status and attempt count in `<run-dir>/tasks.json` as it resolves
+13. Update each task's status and attempt count in `<run-dir>/tasks.json` as it resolves
     (`pending` → `running` → `pass` → `merged`, or `blocked` / `skipped` / `unmerged`), and
     append every spawn to `run.json`'s `spawns` as batches go out.
-12. The phase is done when every task is MERGED, BLOCKED, SKIPPED, or UNMERGED.
+14. **Close the batch and loop.** The batch is closed only once every task dispatched into it —
+    including every reassignment and integration retry spawned to resolve it — has reached a
+    terminal status (MERGED, BLOCKED, UNMERGED, or SKIPPED). Only then go back to step 2 and pause
+    for the next batch. The phase itself is done when the ready set is empty and every task is
+    MERGED, BLOCKED, SKIPPED, or UNMERGED.
 
 ## Phase 6 — Verify & hand off
 

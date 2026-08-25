@@ -49,16 +49,16 @@ quality. Pass the mode through in your handoff:
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Concurrent tasks | 10 | 5 | 2 |
+| Batch-size ceiling | 10 | 5 | 2 |
 | Soft spawn budget | 120 units | 40 units | 8 units |
 
 - **`mode=full`** — every routed specialist, up to 3 review rounds each. Right for real features,
   anything touching architecture or data, anything you'd want a second opinion on. This is also
   the fallback when the request genuinely doesn't tell you which way to go: over-reviewing costs
   money, under-reviewing costs correctness.
-- **`mode=lite`** — routing capped at 4 specialists, 1 review round, fewer concurrent tasks.
-  Right for small, well-understood, moderately-scoped work where a full adversarial pass is
-  overkill but the request still deserves a spec.
+- **`mode=lite`** — routing capped at 4 specialists, 1 review round, a lower Phase 5 batch-size
+  ceiling. Right for small, well-understood, moderately-scoped work where a full adversarial pass
+  is overkill but the request still deserves a spec.
 - **`mode=micro`** — no specialists, no spec review: the request goes straight to task
   decomposition and execution, a handful of agents in total. Right for work that is *already*
   fully specified by its own one-sentence statement — a typo fix, a rename, a config value, a
