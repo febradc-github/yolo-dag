@@ -1,6 +1,6 @@
 ---
 description: Entrypoint for the yolo-dag plugin — turns a raw, possibly ambiguous request into a fully-specified one, resolving ambiguity autonomously and asking the user only when a decision is genuinely high-stakes, then hands off to the orchestrator skill to actually build it.
-argument-hint: The request to run through the pipeline. Add `mode=lite` for a cheaper single-review-round run, `mode=full` to force the full 3-round pass, `mode=micro` to skip the specialist phases entirely for small unambiguous work, `--all` to force all 8 specialists, or `--plan-only` to stop after the task graph. With no mode flag, the run is sized automatically.
+argument-hint: The request to run through the pipeline. Add `mode=lite` for a cheaper single-review-round run, `mode=full` to force the full 3-round pass, `mode=micro` to skip the specialist phases entirely for small unambiguous work, `--all` to force all 8 specialists, or `--plan-only` to stop right after the task graph without even asking, since the go-ahead prompt normally offered there would otherwise just sit waiting. With no mode flag, the run is sized automatically.
 ---
 
 # /brainstorm — Resolve the Request, Then Hand Off
