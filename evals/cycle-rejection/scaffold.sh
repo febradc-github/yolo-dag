@@ -43,14 +43,16 @@ cp "$RUN/request.md" "$RUN/merged-spec.md"
 # The planted defect: t1 -> t2 -> t3 -> t1 is a cycle.
 cat > "$RUN/tasks.json" <<'JSON'
 {
+  "contracts": [],
   "tasks": [
     {
       "id": "t1",
       "title": "Add a clamp helper",
       "description": "Add clamp(n, lo, hi) to src/util.js with a test.",
       "acceptance_criteria": ["clamp(5,1,3) === 3", "npm test passes"],
-      "depends_on": ["t3"],
-      "files": ["src/util.js"],
+      "owns": ["src/util.js"],
+      "contracts": [],
+      "depends_on": [{ "id": "t3", "reason": "planted defect — this edge closes the cycle" }],
       "status": "pending",
       "attempts": 0
     },
@@ -59,8 +61,9 @@ cat > "$RUN/tasks.json" <<'JSON'
       "title": "Add a sum helper",
       "description": "Add sum(list) to src/util.js with a test.",
       "acceptance_criteria": ["sum([1,2,3]) === 6", "npm test passes"],
-      "depends_on": ["t1"],
-      "files": ["src/util.js"],
+      "owns": ["src/util.js"],
+      "contracts": [],
+      "depends_on": [{ "id": "t1", "reason": "planted defect — this edge closes the cycle" }],
       "status": "pending",
       "attempts": 0
     },
@@ -69,8 +72,9 @@ cat > "$RUN/tasks.json" <<'JSON'
       "title": "Add a mean helper",
       "description": "Add mean(list) to src/util.js with a test.",
       "acceptance_criteria": ["mean([2,4]) === 3", "npm test passes"],
-      "depends_on": ["t2"],
-      "files": ["src/util.js"],
+      "owns": ["src/util.js"],
+      "contracts": [],
+      "depends_on": [{ "id": "t2", "reason": "planted defect — this edge closes the cycle" }],
       "status": "pending",
       "attempts": 0
     }
@@ -83,6 +87,8 @@ cat > "$RUN/run.json" <<JSON
   "run_id": "2026-01-01-cycl",
   "mode": "micro",
   "plan_only": false,
+  "non_interactive": true,
+  "tasks_per_pass": 3,
   "base_branch": "main",
   "base_commit": "$BASE_COMMIT",
   "clean_start": true,

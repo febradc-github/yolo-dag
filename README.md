@@ -4,17 +4,19 @@ A Claude Code plugin that turns an ambiguous request into a reviewed, executed, 
 — structured as a directed graph of agent nodes rather than a linear script (see "Design: a DAG
 with bounded loops" below).
 
-![yolo-dag workflow: /brainstorm sizes the run and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into a task DAG, executes that DAG in user-paced batches — pausing to ask how many tasks to dispatch next and merging each passing task onto the integration branch as its batch resolves — then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.gif)
+![yolo-dag workflow: /brainstorm asks whether this is a plan-only run or a full run, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into independent tasks bound by shared contracts, then implements directly on a full run or asks first on a plan-only run — executing in user-paced passes, one number asked per pass and the orchestrator picking the tasks, merging each approved task onto the integration branch — then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.gif)
 
 ## Workflow
 
 Run `/brainstorm <your request>`:
 
-**Brainstorm (entrypoint)** — resolves ambiguity in the request. Decides autonomously by default
-and only asks the user when a decision is genuinely high-stakes (irreversible, expensive, or
-touches security/data); everything else gets a sensible default, stated explicitly so it's
-visible and correctable. Picks a run size, then hands off to the orchestrator — the user is never
-blocked answering questions they don't care about.
+**Brainstorm (entrypoint)** — asks one question first: **plan-only run, or full run?** That single
+answer sets everything about how the run treats you afterwards (see [Run type](#run-type)). Then
+it resolves ambiguity in the request: decides autonomously by default and only asks when a
+decision is genuinely high-stakes (irreversible, expensive, or touches security/data); everything
+else gets a sensible default, stated explicitly so it's visible and correctable. Picks a run size,
+then hands off to the orchestrator — the user is never blocked answering questions they don't
+care about.
 
 The orchestrator then runs six phases:
 
@@ -36,26 +38,37 @@ The orchestrator then runs six phases:
    internally excellent and mutually incompatible — the architecture spec and the data spec
    assuming different datastores, say. Contradictions go back to both specialists; anything still
    unresolved becomes an Open Concern.
-4. **Decompose** — `task-specialist` breaks the merged spec into a task DAG: tasks with explicit
-   `depends_on` edges, checkable acceptance criteria, and a declared file footprint. The
-   orchestrator validates the graph is acyclic and reports its shape. It then **always pauses**
-   here with the routing decision, the merged spec, the task graph and its shape, and any Open
-   Concerns, and asks whether to proceed — this is the point where the user reviews the final
-   spec before anything gets built. `--plan-only` skips the question and stops here directly;
-   otherwise a "not yet" leaves the run parked in exactly the same spot, resumable later with
-   `/dag-resume`.
-5. **Execute, verify & merge** — user-paced batches, not a continuous ready-queue: the run's
-   `dag/<run-id>` integration branch is created first, then before every batch the orchestrator
-   pauses and asks how many ready tasks to dispatch next (so a review pass covers one bounded
-   batch instead of the whole DAG landing at once). Each worker implements in an isolated worktree
-   cut from the branch's current tip, so a dependent's tree literally contains its dependencies'
-   finished code, not a prose summary of it. Workers report where their work lives via a machine
-   trailer (worktree, commit sha, blocker class); reviewers verify inside that worktree against the
-   task's own acceptance criteria; flagged tasks get a fresh worker (3 attempts, then BLOCKED,
-   dependents SKIPPED); passing tasks merge onto the branch immediately, with merge conflicts
-   reworked by a fresh worker on top of the integrated code rather than resolved silently. The
-   batch is only closed — and the next pause offered — once every task dispatched into it,
-   retries included, reaches a terminal state.
+4. **Decompose** — `task-specialist` breaks the merged spec into tasks designed to be
+   **independent first**: where two tasks would touch the same interface, schema, or event shape,
+   it writes that boundary out as a **shared contract** and gives both sides the same text
+   verbatim, so they build against it in parallel instead of queueing behind each other. A real
+   `depends_on` edge is the last resort, and carries a reason for why it couldn't be designed
+   away. Every file is owned by exactly one task, so a task record now carries `id`, `title`,
+   `description`, `acceptance_criteria`, `owns` (the files it alone creates or modifies),
+   `contracts` (which shared contracts it owns or consumes), and `depends_on` (task ids, each with
+   a reason, empty by default). The orchestrator validates all of that — unique
+   ids, acyclicity, no shared file ownership, every contract defined and owned — and reports the
+   graph's shape. It then reports the plan (routing, merged spec, graph, Open Concerns) and
+   branches on the run type: a **full run** enters implementation immediately, a **plan-only run**
+   stops here and asks. A "not yet" leaves the run parked, resumable later with `/dag-resume`.
+5. **Execute, verify & merge** — user-paced passes, not a continuous ready-queue: the run's
+   `dag/<run-id>` integration branch is created first, then before every pass the orchestrator
+   asks **one number** — how many tasks to run in parallel — and picks the tasks itself, so a
+   review pass covers one bounded batch of finished work instead of the whole DAG landing at once.
+   Every task in a pass is fully independent of every other task in it — when the number you asked
+   for would pull in a task that isn't, it runs the eligible subset and says why rather than asking
+   again ("You asked for 3 tasks. Task 3 depends on Task 2, so only Tasks 1 and 2 can run in this
+   pass"), and the same when fewer independent tasks remain than you asked for. Each worker
+   implements in
+   an isolated worktree cut from the branch's current tip, so a dependent's tree literally contains
+   its dependencies' finished code, not a prose summary of it. Workers report where their work
+   lives via a machine trailer (worktree, commit sha, blocker class); reviewers verify inside that
+   worktree against the task's own acceptance criteria and contracts; a flagged task goes back to
+   its own worker to rework and returns to the reviewer (2 reworks, then BLOCKED, dependents
+   SKIPPED) — **a task is done only when a reviewer approves it**; passing tasks merge onto the
+   branch immediately, with merge conflicts reworked by a fresh worker on top of the integrated
+   code rather than resolved silently. The pass is only closed — and the next number asked — once
+   every task dispatched into it, retries included, reaches a terminal state.
 6. **Verify & hand off** — runs the suite once against the assembled branch (individually-passing
    tasks can still be collectively broken), then a final acceptance review compares the *whole
    diff* against the merged spec and the original request — the only point in the pipeline where
@@ -83,7 +96,7 @@ Three practical realities, stated here because discovering them mid-run is worse
   file edits). Everything it writes lands in `.dag/`, isolated worktrees, and one `dag/<run-id>`
   branch.
 - **What it costs.** A worst-case `full` run spawns north of a hundred agents. `micro` exists for
-  the other end of the scale, and `--plan-only` lets you see the plan before paying for the
+  the other end of the scale, and a plan-only run lets you see the plan before paying for the
   build.
 
 ## Run state
@@ -92,14 +105,17 @@ Every phase persists to `.dag/runs/<run-id>/` as it completes:
 
 ```
 .dag/runs/2026-08-21-a3f9/
-├── run.json              # machine-readable manifest: mode, base commit, phase status,
-│                         #   spawn ledger (the budget is computed from this), degradations
+├── run.json              # machine-readable manifest: mode, run type (`plan_only`), whether the
+│                         #   run is non-interactive (and its `tasks_per_pass`), base commit,
+│                         #   phase status, spawn ledger (the budget is computed from this),
+│                         #   degradations
 ├── request.md            # the restated request + stated assumptions
 ├── routing.md            # which specialists were selected, and why the rest weren't
 ├── specialists/<name>/round-{1,2,3}.md
 ├── merged-spec.md
 ├── reconcile.md          # cross-specialist contradictions and how each resolved
-├── tasks.json            # the task DAG, with per-task status and attempt count
+├── tasks.json            # the task graph and its shared contracts, with per-task status
+│                         #   and attempt count
 └── integration.md        # the integrated suite result + the acceptance review
 ```
 
@@ -115,33 +131,63 @@ with `/dag-cancel`, and clear old debris with `/dag-clean`.
 
 `.dag/` is gitignored; it's local working state, not repo content.
 
+## Run type
+
+The first thing `/brainstorm` asks — before clarifying questions, before reading any code — is
+one question:
+
+> **Is this a plan-only run, or should it continue into implementation?**
+
+That answer holds for the whole run and sets two things:
+
+| | **Full run** | **Plan-only run** |
+|---|---|---|
+| At the implementation boundary | enters implementation with no confirmation, never re-asks | stops and asks; starts nothing until you say go |
+| Tasks in parallel per pass | you pick, up to **3** | you pick, **no maximum** |
+
+Those are the only two interactive gates in the pipeline: the plan-only implementation boundary,
+and the one-number question before each execution pass. Everything else — routing, design calls,
+how Open Concerns resolve, how a tight budget degrades — the pipeline decides and reports. A
+caller with no user attached pre-answers both rather than hanging on them; see
+[Unattended runs](#unattended-runs).
+
+Passing `--plan-only` or `--full-run` pre-answers the question, so it never gets asked. They are
+mutually exclusive — passing both is an error, not a precedence puzzle.
+
+The asymmetry on parallelism is deliberate: a plan-only run has already had the whole task graph
+read and approved by a human, so there's nothing left for a ceiling to protect. A full run hasn't,
+so its passes stay small enough to review as they land.
+
 ## Modes
 
-A run is `full`, `lite`, or `micro`. They differ in how much scrutiny the request gets, and
-therefore in what it costs:
+The mode is a separate axis from the run type: it sizes how much scrutiny the request gets, and
+therefore what it costs. A run is `full`, `lite`, or `micro`:
 
 | | `full` | `lite` | `micro` |
 |---|---|---|---|
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Batch-size ceiling | 10 | 5 | 2 |
 | Soft spawn budget | 120 units | 40 units | 8 units |
 
-The batch-size ceiling caps what the per-batch dispatch prompt in Phase 5 will offer or accept —
-the user picks the actual number at each pause.
+The mode does not set concurrency — how many tasks run at once is asked per pass, capped by the
+run type.
 
 ### Passing a mode
 
 Put the flag anywhere in the request — the start reads most clearly. It's stripped from the
-request text before the specialists see it.
+request text before the specialists see it. The first line below is the argument hint the
+slash-command picker shows; the rest are real invocations.
 
 ```
+/brainstorm Request [mode=lite|full|micro] [--all] [--plan-only|--full-run]
+
 /brainstorm mode=micro fix the typo in the onboarding email copy
 /brainstorm mode=lite add a --json flag to the export command, matching the existing --csv one
 /brainstorm mode=full add SSO to the admin console
 /brainstorm --all rewrite the billing service
 /brainstorm --plan-only migrate the session store to Redis
+/brainstorm --full-run mode=lite add a --json flag to the export command
 ```
 
 - **`mode=micro`** — no specialists, no spec review: straight to decomposition and execution, a
@@ -155,12 +201,45 @@ request text before the specialists see it.
 - **`--all`** — forces all eight specialists and skips the routing judgment entirely. Combines
   with `full` or `lite` (not `micro`, which has no specialists). Reach for it when you think
   routing will wrongly skip a domain that matters.
-- **`--plan-only`** — the orchestrator always pauses after Phase 4 to ask whether to proceed, with
-  the routing, the merged spec, and the task graph laid out for review; this flag just skips that
-  question and stops there directly, before any code is written — useful for a non-interactive
-  invocation that shouldn't sit waiting on a prompt. Execution is the majority of the cost and the
-  only part that changes files; `/dag-resume <run-id>` executes the plan once you've read it,
-  whether it stopped via this flag or because you answered "not yet" at the prompt.
+- **`--plan-only`** — sets the [run type](#run-type) without being asked for it. The orchestrator
+  stops at the implementation boundary with the routing, the merged spec, and the task graph laid
+  out for review, and starts nothing until you say go. Execution is the majority of the cost and
+  the only part that changes files; answer "not yet" and `/dag-resume <run-id>` executes the plan
+  later, once you've read it.
+- **`--full-run`** — the counterpart: sets the run type to full without being asked, so the
+  pipeline goes from the plan straight into implementation. Mutually exclusive with
+  `--plan-only`; passing both is an error rather than a precedence rule.
+
+### Unattended runs
+
+An eval runner or a scripted caller has nobody to answer the two questions above, so it
+pre-answers them instead. Both flags are required together, alongside a run type — including on a
+plan-only run, which parks before it would ever ask for a number, because the number is run state
+that `/dag-resume` picks up later rather than an answer to one prompt:
+
+```
+/brainstorm --full-run --non-interactive --tasks-per-pass 3 mode=lite add a --json flag to the export command
+```
+
+- **`--non-interactive`** — declares that no user is attached. It is always explicit, and is
+  **never inferred** — not from a missing TTY, not from an unanswered question. It lands in
+  `run.json` as `non_interactive`, so a resumed run behaves the same way.
+- **`--tasks-per-pass N`** — answers the per-pass question with `N` for every pass in the run,
+  recorded as `tasks_per_pass`. It is honored **only** in non-interactive mode: passing it to an
+  ordinary interactive run is an error, because the per-pass pause is a review checkpoint rather
+  than a formality. `N` is still bound by the run type's cap (3 on a full run, uncapped on a
+  plan-only one) and passing a larger one fails at startup instead of being quietly clamped —
+  though an `N` larger than the number of *eligible* tasks is fine, and runs the eligible subset
+  exactly as a typed answer would.
+
+Nothing else changes: the plan is still reported before implementation, dependency rules still
+decide what is eligible, and a pass still has to finish completely before the next one starts. A
+non-interactive plan-only run reports its plan and parks at the implementation boundary, where
+`/dag-resume <run-id>` is the go-ahead — and the `tasks_per_pass` it was started with is the
+number that resumed pass uses.
+
+These three flags are documented here rather than in the slash-command hint, which stays short
+enough to read at a glance and carries only what you'd type by hand.
 
 ### If you pass nothing
 
@@ -179,8 +258,9 @@ The budget is cost-weighted — a session-model spawn counts 1.0 units, Sonnet 0
 computed from the spawn ledger in `run.json`, never from the orchestrator's memory of it (a
 compacted context forgets spawns, and that drift is silent overspend). When a run crosses its
 ceiling the orchestrator degrades rather than silently overspending or stopping halfway: fewer
-review rounds first, then a narrower specialist set, then a lower batch-size ceiling — and it says
-what it dropped. A `lite` run that turns out to be bigger than it looked degrades within `lite`;
+review rounds first, then a narrower specialist set, then a lower parallelism cap at the per-pass
+prompt (in a plan-only run, which has no cap, it states what a large pass will cost instead of
+capping it) — and it says what it dropped. A `lite` run that turns out to be bigger than it looked degrades within `lite`;
 it does not quietly become a `full` run.
 
 Agents declare their own model tier: `spec-consolidator` runs on Haiku (it deduplicates and ranks
@@ -201,30 +281,33 @@ in parallel (anything with no unresolved edges pointing into it).
 
 - **Fan-out/fan-in** happens twice: the specialists converge at Merge (Phase 3), and within each
   specialist's review round, the 3 reviewers converge at the consolidator.
-- **The task layer is a real DAG, scheduled in user-paced batches.** `task-specialist` emits tasks
-  with explicit `depends_on` edges; the orchestrator validates acyclicity via topological levels
-  ("waves" — still how a run's shape is reported), then executes in batches: before each one it
-  asks how many of the currently-ready tasks to dispatch, critical path first, and won't dispatch
-  the next batch until every task in the current one — retries included — has reached a terminal
-  state. That keeps a review pass scoped to one batch instead of the whole DAG landing at once.
-  Edges are still made real by continuous integration within a batch — a dependent's worktree is
-  cut from the integration branch after its dependencies landed, so it builds on their actual
-  code.
-- **The review loop (up to 3 rounds) and the retry loop (up to 3 attempts) are the one place this
-  isn't a pure DAG.** A strict DAG can't have cycles — resuming a specialist or reassigning a
-  flagged task is cyclic control flow. In practice it behaves like a *bounded, unrolled* DAG:
-  round 1 and round 2 are really distinct nodes, capped so the loop provably terminates instead
-  of running forever. This is the same compromise most real workflow engines make, since a pure
-  acyclic graph can't express "try again, up to N times" on its own. The same discipline bounds
-  the spec-defect feedback path: when most task failures classify the *spec* as the problem, the
-  graph goes back to `task-specialist` for correction exactly once per run.
+- **The task layer is a real DAG, but a deliberately flat one, scheduled in user-paced passes.**
+  `task-specialist` optimizes for a graph with as few edges as possible: where two tasks share a
+  boundary, it writes the boundary down as a contract both sides code against, rather than making
+  one wait for the other. Edges that survive that carry a reason. The orchestrator validates
+  acyclicity via topological levels ("waves" — still how a run's shape is reported), then executes
+  in passes: before each one it asks how many tasks to run in parallel, selects an independent set
+  itself, critical path first, and won't dispatch the next pass until every task in the current
+  one — reworks included — has reached a terminal state. That keeps a review pass scoped to one
+  batch of work instead of the whole DAG landing at once. Edges are still made real by continuous
+  integration across passes — a dependent's worktree is cut from the integration branch after its
+  dependencies landed, so it builds on their actual code.
+- **The review loop (up to 3 rounds), the rework loop (up to 2 reworks per task), and contract
+  revision are the one place this isn't a pure DAG.** A strict DAG can't have cycles — resuming a
+  specialist, sending a flagged task back to its worker, or reopening every consumer of a revised
+  contract is cyclic control flow. In practice it behaves like a *bounded, unrolled* DAG: round 1
+  and round 2 are really distinct nodes, capped so the loop provably terminates instead of running
+  forever. This is the same compromise most real workflow engines make, since a pure acyclic graph
+  can't express "try again, up to N times" on its own. The same discipline bounds the other two
+  feedback paths: a contract can be revised once, and when most task failures classify the *spec*
+  as the problem, the graph goes back to `task-specialist` for correction exactly once per run.
 
 ## Structure
 
 ```
 yolo-dag/
 ├── skills/
-│   ├── brainstorm/              # entrypoint — resolves ambiguity, hands off to orchestrator
+│   ├── brainstorm/              # entrypoint — asks the run type, resolves ambiguity, hands off
 │   └── orchestrator/            # route, review loops, merge+reconcile, decompose, execute, integrate
 ├── commands/
 │   ├── dag-runs.md              # list past runs

@@ -1,5 +1,5 @@
 name: decomposition
-description: Phase 4 emits a valid acyclic task graph with real dependency edges rather than folding ordered work into oversized tasks.
+description: Phase 4 emits a valid acyclic graph of independent tasks bound by an explicit shared contract, with sole file ownership and a justified reason on any edge it could not design away.
 runs: 3
 tags: [cheap, phase-4]
 max_turns: 40

@@ -13,15 +13,17 @@ Target run: `$ARGUMENTS` — if empty, use the most recent directory under `.dag
 Read `run.json` first — its `phases` map is the authority on what completed — then the markdown
 artifacts for the substance. Report:
 
-1. **Header** — run id, mode, whether `--plan-only` was set, the phase reached, and the
-   `integration_branch` if one exists (with `base_branch`/`base_commit` it was cut from).
+1. **Header** — run id, mode, the run type (plan-only or full, from `plan_only`), whether the run
+   is non-interactive (from `non_interactive`, with its `tasks_per_pass`), the phase reached, and
+   the `integration_branch` if one exists (with `base_branch`/`base_commit` it was cut from).
 2. **Routing** — which specialists were selected and which were skipped, with the stated reason,
    from `routing.md`.
 3. **Review loops** — per specialist, how many rounds ran and whether it closed clean or carried
    an Open Concern, from `specialists/<name>/round-*.md` and the `specialists` array in
    `run.json`.
 4. **Reconciliation** — contradictions found and how each resolved, from `reconcile.md`.
-5. **Task graph** — from `tasks.json`: total tasks, the level/wave shape, and a count by status
+5. **Task graph** — from `tasks.json`: total tasks, the level/wave shape, the shared contracts
+   and which task owns each, and a count by status
    (MERGED / BLOCKED / SKIPPED / UNMERGED / not yet attempted). List every task that is not
    MERGED individually, with its accumulated findings, its `BLOCKER:` class if one was reported,
    and — for UNMERGED tasks — the worktree path holding the only copy of the work. Those are the
