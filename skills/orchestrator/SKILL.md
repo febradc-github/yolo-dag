@@ -1,6 +1,6 @@
 ---
-description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally handed off from the brainstorm skill), routes it to the relevant domain specialists, runs each through a 3-reviewer/1-consolidator review loop, merges and reconciles the results into one build spec, decomposes it into a task DAG, executes that DAG in user-paced batches of worktree-isolated workers — pausing before each batch to ask how many to dispatch, and waiting for the whole batch to finish and merge before asking again — then verifies and acceptance-reviews the assembled branch. Persists every phase to .dag/runs/<run-id>/ (including a machine-readable run.json) so an interrupted run can resume.
-argument-hint: A fully-specified request — normally the handoff from /brainstorm, but can be invoked directly if the request is already unambiguous. Add `mode=lite` for a cheaper single-review-round run, `mode=full` for the full 3-round pass, `mode=micro` to skip the specialist phases entirely (the request is the spec), `--all` to force all 8 specialists, or `--plan-only` to stop cleanly after the task graph and let /dag-resume execute it later.
+description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally handed off from the brainstorm skill), routes it to the relevant domain specialists, runs each through a 3-reviewer/1-consolidator review loop, merges and reconciles the results into one build spec, decomposes it into a task DAG, then always pauses to let the user review the final spec and task graph before asking whether to proceed — and once they say go, executes that DAG in user-paced batches of worktree-isolated workers, pausing before each batch to ask how many to dispatch and waiting for the whole batch to finish and merge before asking again — then verifies and acceptance-reviews the assembled branch. Persists every phase to .dag/runs/<run-id>/ (including a machine-readable run.json) so an interrupted run can resume.
+argument-hint: A fully-specified request — normally the handoff from /brainstorm, but can be invoked directly if the request is already unambiguous. Add `mode=lite` for a cheaper single-review-round run, `mode=full` for the full 3-round pass, `mode=micro` to skip the specialist phases entirely (the request is the spec), `--all` to force all 8 specialists, or `--plan-only` to stop right after the task graph without even asking, since the go-ahead prompt normally offered there would otherwise just sit waiting.
 ---
 
 # orchestrator — Route, Review, Reconcile, Decompose, Execute, Integrate
@@ -9,9 +9,10 @@ You receive a request that has already been resolved to zero high-stakes ambigui
 handed off by the `brainstorm` skill, whose restated request and stated assumptions you should
 treat as ground truth; don't re-litigate them. Take it through six phases: route it to the
 specialists whose domains actually apply, let each survive an adversarial review loop, merge and
-reconcile them into one build spec, decompose that spec into a task DAG, execute that DAG in
-user-paced batches of worktree-isolated workers — pausing before each batch to ask how many to
-dispatch, merging each passing task onto the run's integration branch as its batch resolves —
+reconcile them into one build spec, decompose that spec into a task DAG, then pause so the user
+can review the final spec and task graph and say whether to proceed — only then execute that DAG
+in user-paced batches of worktree-isolated workers, pausing before each batch to ask how many to
+dispatch and merging each passing task onto the run's integration branch as its batch resolves —
 then verify and acceptance-review the assembled branch.
 
 Input: $ARGUMENTS
@@ -96,8 +97,10 @@ inconsistency and stop rather than guessing.
   how to degrade when a budget is tight. Only interrupt the user when a decision is genuinely
   high-stakes (irreversible, expensive, materially changes scope, or touches security/data in a
   way that's hard to walk back). State assumptions plainly wherever they show up rather than
-  pausing to get them rubber-stamped. The one standing exception is Phase 5's per-batch dispatch
-  prompt — that pause is deliberate and happens on every batch regardless of stakes.
+  pausing to get them rubber-stamped. There are two standing exceptions, both deliberate and both
+  happening regardless of stakes: the Phase 4→5 boundary always pauses for a go-ahead on the
+  final spec before any code gets written, and Phase 5's per-batch dispatch prompt pauses before
+  every batch.
 - **All spawning happens from this skill.** No agent defined in this plugin has `Agent` in its
   own `tools` — every specialist, reviewer, consolidator, reconciler, worker, and the
   task-specialist is spawned directly by you, the main thread running this skill. This is
@@ -284,11 +287,28 @@ not a strict wave-by-wave walk.
 
 Warn — don't block — if two tasks that can be ready at the same time declare overlapping `files`.
 
-**If `--plan-only` was passed, stop here — cleanly.** Report the routing decision, the merged
-spec's location, the task graph and its shape, and any Open Concerns; leave phases 5–6
-`"pending"` in `run.json`; and tell the user `/dag-resume <run-id>` executes the plan when
-they're ready. Execution is the majority of the cost and the only part that writes code — this
-flag exists so the user can see the plan without paying for the build.
+**Always pause for a go-ahead before Phase 5.** This is the point where the user gets to review
+the final spec — routing decision, merged spec location, the task graph and its shape ("14 tasks
+in 4 waves: 6, 5, 2, 1"), and any Open Concerns — before anything gets built. Report all of that,
+then:
+
+- **If `--plan-only` was passed**, stop here — cleanly, no question asked: leave phases 5–6
+  `"pending"` in `run.json` and tell the user `/dag-resume <run-id>` executes the plan when
+  they're ready. The flag exists precisely to skip straight to this stop, e.g. for a
+  non-interactive invocation that shouldn't sit waiting on a prompt.
+- **Otherwise, ask via `AskUserQuestion`** whether to proceed with implementation now.
+  - **Proceed** → move straight into Phase 5.
+  - **Not yet** → leave phases 5–6 `"pending"` in `run.json`, same as `--plan-only`'s exit, and
+    tell them `/dag-resume <run-id>` executes the plan once they're ready.
+  - **Substantive feedback on the spec or graph itself** (not just "not yet") → route it to
+    where it actually belongs — a task-shape complaint back to `task-specialist` (resumable
+    in-session via `SendMessage`), a spec-level complaint back to the relevant Phase 1
+    specialist — re-validate whatever comes back, then re-offer this same gate. Don't
+    reinterpret their feedback yourself and proceed on a guess.
+
+Execution is the majority of the cost and the only part that writes code — this gate exists so
+the user always sees the plan before paying for the build, not just when they remembered to pass
+a flag.
 
 ## Phase 5 — Execute, verify & merge (in user-paced batches)
 

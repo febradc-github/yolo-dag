@@ -1,5 +1,5 @@
 ---
-description: Resume an interrupted yolo-dag run from its persisted state, re-entering at the first phase run.json does not mark complete instead of starting over. Also how a --plan-only run gets executed once the user has reviewed the plan.
+description: Resume an interrupted yolo-dag run from its persisted state, re-entering at the first phase run.json does not mark complete instead of starting over. Also how a run parked at the pre-execution go-ahead gate (via --plan-only, or by answering "not yet" at that gate) gets executed once the user has reviewed the plan.
 argument-hint: A run id (e.g. 2026-08-21-a3f9). Omit to resume the most recent unfinished run.
 allowed-tools: ["Read", "Glob", "Bash", "Write", "Skill", "Agent", "SendMessage"]
 ---
@@ -7,7 +7,9 @@ allowed-tools: ["Read", "Glob", "Bash", "Write", "Skill", "Agent", "SendMessage"
 # /dag-resume — Resume an interrupted run
 
 Pick up a pipeline run that stopped partway through — whether it was interrupted, cancelled via
-`/dag-cancel`, or deliberately parked by `--plan-only` after the task graph.
+`/dag-cancel`, or deliberately parked at the pre-execution go-ahead gate after the task graph
+(either because `--plan-only` skipped straight past the prompt, or the user answered "not yet"
+when asked).
 
 Target run: `$ARGUMENTS` — if empty, use the most recent unfinished directory under
 `.dag/runs/`.
@@ -45,5 +47,6 @@ completed phase, and continues. The rules that matter on a resume:
   rather than guessing.
 - Tasks marked `running` by a dead or cancelled session are re-dispatched from `pending` — a
   worker that never reported produced nothing mergeable.
-- **A `--plan-only` run resumes into Phase 5.** The resume *is* the user's approval to execute
-  the plan they reviewed; don't ask again.
+- **A run parked at the pre-execution gate resumes straight into Phase 5, no re-ask.** Whether it
+  stopped there via `--plan-only` or by the user answering "not yet," invoking `/dag-resume` *is*
+  the approval to execute the plan they reviewed — don't offer the gate a second time.

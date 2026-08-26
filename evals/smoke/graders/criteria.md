@@ -30,8 +30,13 @@ point is that the machinery survives end to end, not that the work is hard.
 9. `lite` mode was honoured: at most 4 specialists, one review round each.
 10. The task graph has more than one task, and at least one dependency edge if the work warranted
     one. A single monolithic task suggests the decomposition rules were skipped.
-11. The user was not asked to approve intermediate artifacts. Nothing here is high-stakes, so a
-    pause for sign-off on the merged spec contradicts the pipeline's stated principle.
+11. **The only pauses are the two standing ones**: the Phase 4→5 go-ahead gate (routing, merged
+    spec, task graph, Open Concerns, then "proceed?") and Phase 5's per-batch dispatch prompt
+    (how many ready tasks to send out). Both are deliberate as of `0.5.0` and happen regardless
+    of stakes — for `lite`'s small task count here, expect the go-ahead gate once and the batch
+    prompt once or twice. Any *other* pause (sign-off on an intermediate artifact nothing here
+    makes high-stakes, a check-in mid-review-round, etc.) still contradicts the pipeline's stated
+    principle and fails this criterion.
 12. The final summary reports task counts by status, the suite result, the acceptance review's
     `INTEGRATION:` verdict, and where run state lives.
 13. No worktrees of merged tasks are left behind (`git worktree list` shows only the main tree).

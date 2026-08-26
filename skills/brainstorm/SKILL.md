@@ -66,9 +66,10 @@ quality. Pass the mode through in your handoff:
 
 `--all` is separate from the mode and forces all 8 specialists, skipping the routing judgment in
 Phase 1. It combines with `full` or `lite`; it is incompatible with `micro` (which has no
-specialist phase). `--plan-only` is also separate: it makes the orchestrator stop cleanly after
-the task graph so the user can review the plan and execute later with `/dag-resume` — pass it
-through untouched.
+specialist phase). `--plan-only` is also separate: the orchestrator now always pauses after the
+task graph to ask whether to proceed, so this flag just skips straight past that prompt to a
+clean stop, for a caller that shouldn't sit waiting on one — the user still reviews the plan and
+executes later with `/dag-resume` — pass it through untouched.
 
 Choose the mode yourself from the shape of the request rather than asking, and say which you
 picked in one clause.

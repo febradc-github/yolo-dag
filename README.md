@@ -38,7 +38,12 @@ The orchestrator then runs six phases:
    unresolved becomes an Open Concern.
 4. **Decompose** — `task-specialist` breaks the merged spec into a task DAG: tasks with explicit
    `depends_on` edges, checkable acceptance criteria, and a declared file footprint. The
-   orchestrator validates the graph is acyclic and reports its shape.
+   orchestrator validates the graph is acyclic and reports its shape. It then **always pauses**
+   here with the routing decision, the merged spec, the task graph and its shape, and any Open
+   Concerns, and asks whether to proceed — this is the point where the user reviews the final
+   spec before anything gets built. `--plan-only` skips the question and stops here directly;
+   otherwise a "not yet" leaves the run parked in exactly the same spot, resumable later with
+   `/dag-resume`.
 5. **Execute, verify & merge** — user-paced batches, not a continuous ready-queue: the run's
    `dag/<run-id>` integration branch is created first, then before every batch the orchestrator
    pauses and asks how many ready tasks to dispatch next (so a review pass covers one bounded
@@ -150,9 +155,12 @@ request text before the specialists see it.
 - **`--all`** — forces all eight specialists and skips the routing judgment entirely. Combines
   with `full` or `lite` (not `micro`, which has no specialists). Reach for it when you think
   routing will wrongly skip a domain that matters.
-- **`--plan-only`** — stop cleanly after Phase 4 with the routing, the merged spec, and the task
-  graph, before any code is written. Execution is the majority of the cost and the only part
-  that changes files; `/dag-resume <run-id>` executes the plan once you've read it.
+- **`--plan-only`** — the orchestrator always pauses after Phase 4 to ask whether to proceed, with
+  the routing, the merged spec, and the task graph laid out for review; this flag just skips that
+  question and stops there directly, before any code is written — useful for a non-interactive
+  invocation that shouldn't sit waiting on a prompt. Execution is the majority of the cost and the
+  only part that changes files; `/dag-resume <run-id>` executes the plan once you've read it,
+  whether it stopped via this flag or because you answered "not yet" at the prompt.
 
 ### If you pass nothing
 

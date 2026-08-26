@@ -24,6 +24,13 @@ text names explicitly (`runs`, `tags`, `max_turns`, `timeout_seconds`). Expect t
 details on the first real run. Treat a green suite as unproven until someone with access has
 actually run it.
 
+**Open question as of `0.5.0`:** the orchestrator now unconditionally pauses twice via
+`AskUserQuestion` — once at the Phase 4→5 go-ahead gate, once before every Phase 5 batch — and
+none of these cases' `prompt.md`/`case.yaml` say how those get answered in an unattended eval
+run. Whoever gets early access first needs to establish that (a scripted answer, an eval-runner
+default, or whatever the harness offers) before any case past Phase 4 can be trusted to
+complete rather than hang.
+
 ## The cases
 
 | Case | Tags | What it pins down |

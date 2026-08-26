@@ -5,7 +5,7 @@
     {
       "name": "yolo-dag",
       "source": "./",
-      "description": "Turns an ambiguous request into a reviewed, executed, integrated branch: /brainstorm resolves ambiguity, then the orchestrator routes to the relevant specialists, runs per-specialist review loops, reconciles cross-specialist contradictions, decomposes into a task DAG, and executes it in user-paced batches — pausing to ask how many tasks to dispatch next, so review stays bounded per batch instead of the whole DAG landing at once — merging each passing task onto one integration branch as its batch resolves, and closing with a whole-suite run and an acceptance review against the original request."
+      "description": "Turns an ambiguous request into a reviewed, executed, integrated branch: /brainstorm resolves ambiguity, then the orchestrator routes to the relevant specialists, runs per-specialist review loops, reconciles cross-specialist contradictions, and decomposes into a task DAG — then always pauses so the user can review that final spec and task graph before saying whether to proceed. Once they do, it executes in user-paced batches — pausing to ask how many tasks to dispatch next, so review stays bounded per batch instead of the whole DAG landing at once — merging each passing task onto one integration branch as its batch resolves, and closing with a whole-suite run and an acceptance review against the original request."
     }
   ]
 }
