@@ -4,7 +4,7 @@ A Claude Code plugin that turns an ambiguous request into a reviewed, executed, 
 — structured as a directed graph of agent nodes rather than a linear script (see "Design: a DAG
 with bounded loops" below).
 
-![yolo-dag workflow: /brainstorm asks whether this is a plan-only run or a full run, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into independent tasks bound by shared contracts, then implements directly on a full run or asks first on a plan-only run — executing in user-paced passes, one number asked per pass and the orchestrator picking the tasks, merging each approved task onto the integration branch — then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.gif)
+![yolo-dag workflow: /brainstorm asks whether this is a plan-only run or a full run, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into independent tasks bound by shared contracts, then implements directly on a full run or asks first on a plan-only run — executing in user-paced passes, one number asked per pass and the orchestrator picking the tasks, merging each approved task onto the integration branch — then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.jpeg)
 
 ## Workflow
 
