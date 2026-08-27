@@ -1,5 +1,5 @@
 ---
-description: Resume an interrupted yolo-dag run from its persisted state, re-entering at the first phase run.json does not mark complete instead of starting over. Also how a run parked at the pre-execution go-ahead gate (via --plan-only, or by answering "not yet" at that gate) gets executed once the user has reviewed the plan.
+description: Resume an interrupted yolo-dag run from its persisted state, re-entering at the first phase run.json does not mark complete instead of starting over. Also how a plan-only run parked at the implementation boundary gets executed once the user has reviewed the plan.
 argument-hint: A run id (e.g. 2026-08-21-a3f9). Omit to resume the most recent unfinished run.
 allowed-tools: ["Read", "Glob", "Bash", "Write", "Skill", "Agent", "SendMessage"]
 ---
@@ -7,9 +7,8 @@ allowed-tools: ["Read", "Glob", "Bash", "Write", "Skill", "Agent", "SendMessage"
 # /dag-resume — Resume an interrupted run
 
 Pick up a pipeline run that stopped partway through — whether it was interrupted, cancelled via
-`/dag-cancel`, or deliberately parked at the pre-execution go-ahead gate after the task graph
-(either because `--plan-only` skipped straight past the prompt, or the user answered "not yet"
-when asked).
+`/dag-cancel`, or deliberately parked at the implementation boundary after the task graph, which
+is where a plan-only run stops to ask and the user answered "not yet".
 
 Target run: `$ARGUMENTS` — if empty, use the most recent unfinished directory under
 `.dag/runs/`.
@@ -41,12 +40,22 @@ completed phase, and continues. The rules that matter on a resume:
   on disk can have been hand-edited or corrupted since it was written, and a cycle must be
   bounced back to `task-specialist`, never executed and never silently de-edged.
 - **Tasks already MERGED do not re-run.** The integration branch is authoritative for what has
-  landed: a resume into Phase 5 checks out `dag/<run-id>`, recomputes the ready set, and pauses to
-  ask the user how many tasks to dispatch in the next batch, same as any other batch boundary. If
+  landed: a resume into Phase 5 checks out `dag/<run-id>`, recomputes the candidate set, and asks
+  the user how many tasks to run in parallel in the next pass, same as any other pass boundary. If
   `tasks.json` claims MERGED work but the branch is missing, report the inconsistency and stop
   rather than guessing.
+- **The run type comes from `run.json`'s `plan_only`, never from a default.** It sets the cap on
+  that per-pass question — at most 3 on a full run, no maximum on a plan-only one — and a resumed
+  session has no memory of which the user picked.
+- **A non-interactive run resumes non-interactively.** `run.json`'s `non_interactive` and
+  `tasks_per_pass` carry across the resume, so a run seeded or started without a user attached
+  takes its per-pass number from disk instead of asking, exactly as it did before the
+  interruption. Don't re-derive either from how `/dag-resume` was invoked.
 - Tasks marked `running` by a dead or cancelled session are re-dispatched from `pending` — a
   worker that never reported produced nothing mergeable.
-- **A run parked at the pre-execution gate resumes straight into Phase 5, no re-ask.** Whether it
-  stopped there via `--plan-only` or by the user answering "not yet," invoking `/dag-resume` *is*
-  the approval to execute the plan they reviewed — don't offer the gate a second time.
+- **A run parked at the implementation boundary resumes straight into Phase 5, no re-ask.**
+  Invoking `/dag-resume` *is* the approval to execute the plan the user reviewed — don't offer
+  that gate a second time, in either run type.
+- **Workers and reviewers from the dead session are unreachable**, so a flagged task that would
+  normally go back to its own worker gets a fresh one instead, with the findings and a worktree
+  cut from the branch's current tip.

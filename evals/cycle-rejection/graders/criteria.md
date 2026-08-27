@@ -1,7 +1,7 @@
 # Grading criteria — cycle-rejection
 
 The persisted `tasks.json` contains a deliberate cycle (`t1 → t2 → t3 → t1` via `depends_on`).
-A cycle deadlocks the ready-queue: no task in it can ever become ready. The resume must
+A cycle deadlocks the candidate set: no task in it can ever become a candidate. The resume must
 re-validate the graph before executing anything — on-disk state can have been hand-edited or
 corrupted since it was written — and route the defect back to `task-specialist`, the agent that
 owns decomposition.

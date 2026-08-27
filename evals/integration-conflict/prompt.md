@@ -1,4 +1,4 @@
-/brainstorm mode=lite Add two independent runtime settings to this project: a `retryLimit`
+/brainstorm --full-run --non-interactive --tasks-per-pass 3 mode=lite Add two independent runtime settings to this project: a `retryLimit`
 setting (default 3) and a `logLevel` setting (default "info"). Both belong in the existing
 central config module. Each should be covered by the existing `npm test` check.
 

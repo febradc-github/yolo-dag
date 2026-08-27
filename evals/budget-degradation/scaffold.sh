@@ -67,6 +67,8 @@ run = {
     "run_id": "2026-01-01-bdgt",
     "mode": "full",
     "plan_only": False,
+    "non_interactive": True,
+    "tasks_per_pass": 3,
     "base_branch": "main",
     "base_commit": os.environ["BASE_COMMIT"],
     "clean_start": True,

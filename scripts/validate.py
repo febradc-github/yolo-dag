@@ -6,9 +6,9 @@ manifests parse, agent frontmatter is well-formed, tool names are real, the phas
 numbering agrees between the orchestrator and every agent that cites it, the literal
 status-line contracts the orchestrator branches on actually exist in the agents that
 are supposed to emit them, the mode table is identical in all three files that state
-it, every flag an argument-hint documents is one the orchestrator parses, the
-run.json keys commands read are keys the orchestrator writes, and each eval case's
-name matches its directory.
+it, every flag an argument-hint documents is one the orchestrator parses, argument
+hints still fit the slash-command picker's one line, the run.json keys commands read
+are keys the orchestrator writes, and each eval case's name matches its directory.
 
 No third-party dependencies — runs on a bare Python 3.
 Usage: python3 scripts/validate.py   (exit 0 = clean, 1 = failures)
@@ -36,6 +36,10 @@ VALID_TOOLS = {
 VALID_MODELS = {"inherit", "haiku", "sonnet", "opus"}
 
 MAX_PHASE = 6
+
+# Widest picker line "/<plugin>:<skill> <argument-hint>" may render on. 80 columns is the
+# narrowest terminal worth supporting, and the hint is the only part of that line we control.
+PICKER_LINE_BUDGET = 80
 
 # The phase each agent declares via the literal "Phase N of the `orchestrator` skill"
 # sentence in its body. This table is the drift guard: the agent files were once written
@@ -66,7 +70,9 @@ CONTRACTS = {
     "spec-reviewer": ["REVIEW: CLEAN", "REVIEW: FINDINGS"],
     "spec-consolidator": ["CONSOLIDATED:"],
     "spec-reconciler": ["RECONCILE: CLEAN", "RECONCILE: CONTRADICTIONS"],
-    "task-worker": ["WORKTREE:", "BRANCH:", "COMMIT:", "BLOCKER:"],
+    # `contract-conflict` is a blocker class, not a trailer key, but it routes the same way:
+    # the worker emits it and the orchestrator branches to a contract revision on it.
+    "task-worker": ["WORKTREE:", "BRANCH:", "COMMIT:", "BLOCKER:", "contract-conflict"],
     "task-reviewer": ["VERDICT: PASS", "VERDICT: FLAGGED"],
     "integration-reviewer": ["INTEGRATION: PASS", "INTEGRATION: FLAGGED"],
 }
@@ -78,13 +84,13 @@ MODE_TABLE_FILES = [
     "skills/brainstorm/SKILL.md",
     "skills/orchestrator/SKILL.md",
 ]
-MODE_ROW_LABELS = {"Phases", "Specialists", "Review rounds", "Batch-size ceiling",
-                   "Soft spawn budget"}
+MODE_ROW_LABELS = {"Phases", "Specialists", "Review rounds", "Soft spawn budget"}
 
 # Keys the orchestrator writes to run.json. The commands read this file; a command reading
 # a key the orchestrator never writes fails silently at runtime, so pin both ends.
 RUN_JSON_KEYS = {
-    "run_id", "mode", "plan_only", "base_branch", "base_commit", "clean_start",
+    "run_id", "mode", "plan_only", "non_interactive", "tasks_per_pass",
+    "base_branch", "base_commit", "clean_start",
     "integration_branch", "phases", "specialists", "spawns", "degradations",
 }
 # Non-run.json snake_case keys commands may legitimately reference (tasks.json fields).
@@ -352,6 +358,29 @@ def check_flags() -> None:
                      f"orchestrator never parses")
 
 
+def check_hint_length() -> None:
+    """The slash-command picker renders "/<plugin>:<skill> <hint>" on one line. Pin the whole
+    line to an 80-column terminal, the narrowest one worth supporting: the hint that shipped
+    in 0.5.1 ran 380 characters and wrapped over several lines in the picker, which is the
+    regression this check exists to prevent. Flags aimed at unattended callers rather than at
+    someone typing live belong in the README, not in the hint."""
+    try:
+        plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return  # already failed in check_manifests
+    name = plugin.get("name", "")
+    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+        data, _ = parse_frontmatter(path)
+        hint = str(data.get("argument-hint", ""))
+        if not hint:
+            continue
+        line = f"/{name}:{path.parent.name} {hint}"
+        if len(line) > PICKER_LINE_BUDGET:
+            fail(f"{path.relative_to(ROOT)}: argument-hint makes the picker line "
+                 f"{len(line)} columns, over the {PICKER_LINE_BUDGET}-column budget "
+                 f"(hint is {len(hint)} chars; {len(line) - PICKER_LINE_BUDGET} to trim)")
+
+
 def check_run_json_schema() -> None:
     """The orchestrator must define every run.json key the rest of the plugin reads."""
     try:
@@ -395,6 +424,7 @@ def main() -> int:
     check_skills()
     check_mode_tables()
     check_flags()
+    check_hint_length()
     check_run_json_schema()
     check_evals()
 

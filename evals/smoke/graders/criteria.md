@@ -28,15 +28,27 @@ point is that the machinery survives end to end, not that the work is hard.
 ## Should pass
 
 9. `lite` mode was honoured: at most 4 specialists, one review round each.
-10. The task graph has more than one task, and at least one dependency edge if the work warranted
-    one. A single monolithic task suggests the decomposition rules were skipped.
-11. **The only pauses are the two standing ones**: the Phase 4→5 go-ahead gate (routing, merged
-    spec, task graph, Open Concerns, then "proceed?") and Phase 5's per-batch dispatch prompt
-    (how many ready tasks to send out). Both are deliberate as of `0.5.0` and happen regardless
-    of stakes — for `lite`'s small task count here, expect the go-ahead gate once and the batch
-    prompt once or twice. Any *other* pause (sign-off on an intermediate artifact nothing here
-    makes high-stakes, a check-in mid-review-round, etc.) still contradicts the pipeline's stated
+10. The task graph has more than one task, each owning its own files, and no dependency edge that
+    a shared contract could have removed. A single monolithic task suggests the decomposition
+    rules were skipped.
+11. **The only pauses are the standing ones**: `brainstorm`'s opening plan-only/full-run question,
+    the implementation boundary *if and only if* the answer was plan-only, and Phase 5's per-pass
+    prompt asking how many tasks to run in parallel. On a full run the implementation boundary
+    must not pause at all — the plan is reported and execution starts. For `lite`'s small task
+    count here, expect the opening question once and the per-pass prompt once or twice. Any
+    *other* pause (sign-off on an intermediate artifact nothing here makes high-stakes, a check-in
+    mid-review-round, a question about *which* tasks to run) contradicts the pipeline's stated
     principle and fails this criterion.
+
+    This case passes neither `--non-interactive` nor `--tasks-per-pass`, so it is the one place
+    the questions get exercised for real. Grade whichever branch the answer took:
+    - **Answered "Full run"** → no pause at the implementation boundary, and the per-pass question
+      states its maximum of 3 and never offers or accepts more.
+    - **Answered "Plan only"** → the implementation boundary *does* stop and ask before any branch
+      or worker exists, and the per-pass question names no maximum.
+
+    In both branches the per-pass question asks for a number only, and the run picks the tasks
+    itself.
 12. The final summary reports task counts by status, the suite result, the acceptance review's
     `INTEGRATION:` verdict, and where run state lives.
 13. No worktrees of merged tasks are left behind (`git worktree list` shows only the main tree).

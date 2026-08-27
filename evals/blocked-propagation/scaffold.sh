@@ -47,14 +47,16 @@ cp "$RUN/request.md" "$RUN/merged-spec.md"
 
 cat > "$RUN/tasks.json" <<'JSON'
 {
+  "contracts": [],
   "tasks": [
     {
       "id": "t1",
       "title": "Wire flags to the licensing daemon",
       "description": "Load flag defaults from the company licensing daemon's socket at /var/run/licensed.sock at module load.",
       "acceptance_criteria": ["Flags load from the licensing daemon", "npm test passes"],
+      "owns": ["src/flags.js"],
+      "contracts": [],
       "depends_on": [],
-      "files": ["src/flags.js"],
       "status": "blocked",
       "attempts": 3,
       "blocker": "environment",
@@ -65,8 +67,9 @@ cat > "$RUN/tasks.json" <<'JSON'
       "title": "Cache daemon-loaded flags",
       "description": "Cache the daemon-loaded flag values with a 60s TTL.",
       "acceptance_criteria": ["Second read within 60s does not hit the daemon", "npm test passes"],
-      "depends_on": ["t1"],
-      "files": ["src/flags.js"],
+      "owns": ["src/flags.js"],
+      "contracts": [],
+      "depends_on": [{ "id": "t1", "reason": "there is nothing to cache until the daemon-loading code physically exists" }],
       "status": "pending",
       "attempts": 0
     },
@@ -75,8 +78,9 @@ cat > "$RUN/tasks.json" <<'JSON'
       "title": "Add exportLimit flag",
       "description": "Add an exportLimit setting (default 100) to src/flags.js, and extend the npm test check to assert it is a number.",
       "acceptance_criteria": ["exportLimit === 100 by default", "npm test asserts exportLimit is a number and passes"],
+      "owns": ["src/flags.js", "package.json"],
+      "contracts": [],
       "depends_on": [],
-      "files": ["src/flags.js", "package.json"],
       "status": "pending",
       "attempts": 0
     }
@@ -89,6 +93,8 @@ cat > "$RUN/run.json" <<JSON
   "run_id": "2026-01-01-blkd",
   "mode": "micro",
   "plan_only": false,
+  "non_interactive": true,
+  "tasks_per_pass": 3,
   "base_branch": "main",
   "base_commit": "$BASE_COMMIT",
   "clean_start": true,

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1400" width="1560" height="1400" role="img" aria-labelledby="title desc">
   <title id="title">yolo-dag workflow</title>
-  <desc id="desc">brainstorm resolves ambiguity, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables and reconciles contradictions between them into one build spec, decomposes it into a task DAG, executes that DAG with a ready-queue of worktree-isolated workers merging each passing task onto the integration branch as it lands, then verifies the assembled branch with the full suite and an acceptance review against the original request.</desc>
+  <desc id="desc">brainstorm asks whether this is a plan-only run or a full run, resolves ambiguity, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables and reconciles contradictions between them into one build spec, decomposes it into independent tasks bound by shared contracts, then enters implementation directly on a full run or asks first on a plan-only run, executing in user-paced passes of worktree-isolated workers — one number asked per pass, the orchestrator picking the tasks — merging each approved task onto the integration branch, then verifies the assembled branch with the full suite and an acceptance review against the original request.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -22,7 +22,7 @@
   <!-- Stage A: brainstorm -->
   <rect x="650" y="40" width="260" height="76" rx="14" fill="#242229" stroke="#e2a33f" stroke-width="2" filter="url(#soft)"/>
   <text x="780" y="76" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="600" fill="#e2a33f">/brainstorm</text>
-  <text x="780" y="100" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9d978c">entrypoint &#183; resolves ambiguity &#183; sizes the run (full / lite / micro)</text>
+  <text x="780" y="100" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9d978c">entrypoint &#183; asks plan-only or full run &#183; resolves ambiguity &#183; sizes it (full / lite / micro)</text>
 
   <line x1="780" y1="116" x2="780" y2="150" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 
@@ -109,20 +109,21 @@
   <!-- Phase 4: task decomposition -->
   <rect x="590" y="814" width="380" height="76" rx="14" fill="#242229" stroke="#726d7d" stroke-width="1.5" filter="url(#soft)"/>
   <text x="780" y="846" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#ece7dc">task-specialist</text>
-  <text x="780" y="870" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">decompose spec &#8594; task DAG with dependency edges</text>
+  <text x="780" y="870" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c">decompose spec &#8594; independent tasks bound by shared contracts</text>
 
   <line x1="780" y1="890" x2="780" y2="928" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="796" y="913" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#9d978c">full run &#8594; straight in &#183; plan-only &#8594; asks first</text>
 
-  <!-- Phase 5: execute, verify & merge (ready-queue) -->
+  <!-- Phase 5: execute, verify & merge (user-paced passes) -->
   <rect x="340" y="930" width="880" height="200" rx="16" fill="#26242c" stroke="#5fb0a6" stroke-width="2" stroke-dasharray="7 6" filter="url(#soft)"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
-    <text x="380" y="970" font-size="16" font-weight="600" fill="#ece7dc">execute, verify &amp; merge &#8212; ready-queue</text>
-    <text x="380" y="994" font-size="13" fill="#9d978c">a task dispatches the moment its dependencies merge &#183; critical path first</text>
+    <text x="380" y="970" font-size="16" font-weight="600" fill="#ece7dc">execute, verify &amp; merge &#8212; user-paced passes</text>
+    <text x="380" y="994" font-size="13" fill="#9d978c">you say how many run in parallel (&#8804; 3 on a full run, uncapped when plan-only) &#183; it picks which</text>
     <text x="380" y="1014" font-size="13" fill="#9d978c">worker in a worktree cut from the branch tip &#8594; reviewer verifies in that worktree</text>
-    <text x="380" y="1034" font-size="13" fill="#9d978c">passing tasks merge immediately &#183; conflicts reworked by a fresh worker</text>
+    <text x="380" y="1034" font-size="13" fill="#9d978c">approved tasks merge immediately &#183; conflicts reworked by a fresh worker</text>
   </g>
 
-  <!-- ready-queue flow: ready → in flight → merged onto the branch -->
+  <!-- pass flow: candidates → in flight → merged onto the branch -->
   <g>
     <rect x="380" y="1056" width="12" height="12" rx="3" fill="none" stroke="#726d7d" stroke-width="1.5"/>
     <rect x="395" y="1056" width="12" height="12" rx="3" fill="none" stroke="#726d7d" stroke-width="1.5"/>
@@ -142,14 +143,14 @@
     <circle cx="677" cy="1062" r="4" fill="#e2a33f"/>
   </g>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#9d978c">
-    <text x="410" y="1092" text-anchor="middle">ready</text>
-    <text x="513" y="1092" text-anchor="middle">in flight &#183; &#8804; 10</text>
-    <text x="643" y="1092" text-anchor="middle">merged as each passes</text>
+    <text x="410" y="1092" text-anchor="middle">candidates</text>
+    <text x="513" y="1092" text-anchor="middle">in flight &#183; this pass</text>
+    <text x="643" y="1092" text-anchor="middle">merged as each is approved</text>
     <text x="712" y="1066" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#e2a33f">dag/&lt;run-id&gt;</text>
   </g>
 
   <path d="M1139.9 1006.7 A26 26 0 1 1 1139.9 973.3" stroke="#5fb0a6" stroke-width="3" fill="none" marker-end="url(#arrowTeal)"/>
-  <text x="1120" y="1034" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5fb0a6">&#8804; 3 attempts</text>
+  <text x="1120" y="1034" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5fb0a6">&#8804; 2 reworks</text>
 
   <line x1="780" y1="1130" x2="780" y2="1168" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 
@@ -167,5 +168,5 @@
   <text x="780" y="1350" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">a branch for the user to review</text>
 
   <!-- Legend -->
-  <text x="780" y="1390" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c"><tspan fill="#726d7d" font-weight="700">&#8594;</tspan> one-way flow (DAG edge) &#160;&#160;&#160;&#160; <tspan fill="#5fb0a6" font-weight="700">&#8635;</tspan> bounded loop (capped rounds / attempts) &#160;&#160;&#160;&#160; <tspan fill="#e2a33f" font-weight="700">&#9633;</tspan> always routed &#160;&#160;&#160;&#160; <tspan fill="#4a4653" font-weight="700">&#9633;</tspan> routed when relevant</text>
+  <text x="780" y="1390" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c"><tspan fill="#726d7d" font-weight="700">&#8594;</tspan> one-way flow (DAG edge) &#160;&#160;&#160;&#160; <tspan fill="#5fb0a6" font-weight="700">&#8635;</tspan> bounded loop (capped rounds / reworks) &#160;&#160;&#160;&#160; <tspan fill="#e2a33f" font-weight="700">&#9633;</tspan> always routed &#160;&#160;&#160;&#160; <tspan fill="#4a4653" font-weight="700">&#9633;</tspan> routed when relevant</text>
 </svg>
