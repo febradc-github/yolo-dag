@@ -1,13 +1,15 @@
 ---
-description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only run or a full run, turns a raw, possibly ambiguous request into a fully-specified one, resolving ambiguity autonomously and asking the user only when a decision is genuinely high-stakes, then hands off to the orchestrator skill to actually build it.
+description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only run or a full run, then turns a raw, possibly ambiguous request into a fully-specified one through a real back-and-forth with the user via AskUserQuestion, with zero tolerance for gaps in understanding the problem (implementation minutiae are still resolved autonomously), presents its finalized understanding in plain language with an optional generated HTML visual, then hands off to the orchestrator skill to actually build it.
 argument-hint: Request [mode=lite|full|micro] [--all] [--plan-only]
 ---
 
 # /brainstorm — Resolve the Request, Then Hand Off
 
-This is the only phase of `yolo-dag` the user talks to directly. Your job is to
-turn `$ARGUMENTS` into a fully-specified request ready for the `orchestrator` skill, spending as
-little of the user's time as possible while doing it — then hand off.
+This is the only phase of `yolo-dag` the user talks to directly. Your job is to turn
+`$ARGUMENTS` into a fully-specified request ready for the `orchestrator` skill — through a real
+back-and-forth with the user, not a guess. Resolve implementation minutiae yourself to keep the
+conversation short, but never hand off while a gap remains in what's being asked for, why, or how
+success will be judged — then hand off.
 
 Initial input: $ARGUMENTS
 
@@ -44,33 +46,83 @@ pipeline's standing questions. Pass all of them through untouched; the `orchestr
 validates them and records them in `run.json`. Never set `--non-interactive` yourself, and never
 infer it: a question you cannot get an answer to is not evidence that nobody is there.
 
-## Principle: you decide, the user reviews the outcome
+## Principle: zero tolerance for gaps in understanding
 
-Default to resolving ambiguity yourself, using judgment and sensible defaults. The user cares
-about the finished result the orchestrator eventually produces, not about adjudicating every
-ambiguity in the request first — don't make them pay for decisions you could reasonably make on
-your own. Only interrupt them when a decision is genuinely high-stakes: irreversible, expensive,
-materially changes scope, or touches security/data in a way that's hard to walk back.
+Brainstorm exists so the pipeline never builds something blind. Treat any real gap in
+understanding — what's being asked for, who it's for, why it matters, what "done and correct"
+looks like — as disqualifying: the request does not move to the next phase carrying it. This is a
+lower bar to ask than most workflows use, on purpose; a wrong shared understanding compounds
+through every later phase, and asking now is cheap by comparison.
+
+This is not license to interrogate the user about everything. Two different kinds of unknowns get
+two different responses:
+
+- **Gaps in the problem itself** — what's actually being built, for whom, why, and how success is
+  judged. Never guess these. Ask, every time, no matter how small the gap looks.
+- **Implementation minutiae** — format choices, naming, minor scope edges, anything a reasonable
+  engineer would just pick and note rather than escalate, where getting it "wrong" costs a small
+  revision later, not a wrongly-built feature. Decide these yourself and say what you decided in
+  the finalization summary.
+
+When in doubt which pile something belongs to, ask — the failure mode this guards against is a
+confidently wrong assumption about the problem, not an occasional question that turns out to have
+been decidable.
 
 ## Process
 
-1. Read the request and list, in your own head, every genuine ambiguity: what's actually being
-   asked for, scope boundaries (what's explicitly out), constraints (performance, compatibility,
-   deadline), and success criteria (how would anyone know this is done and correct).
-2. Sort each ambiguity into one of two piles:
-   - **Decide it yourself.** The default. Pick the most reasonable interpretation or convention
-     (matching what's already in the codebase where relevant), and move on. Most ambiguities
-     land here — format choices, minor scope edges, anything a reasonable engineer would just
-     decide and note rather than escalate.
-   - **Ask the user.** Reserve this for the genuinely high-stakes few — hard to reverse later,
-     meaningfully changes cost/scope/timeline, or a wrong guess on security/data would be
-     costly. Ask about these one or two at a time: `AskUserQuestion` for a clean multi-way
-     choice, plain conversation otherwise. Don't ask about anything that fits the first pile
-     just to be thorough.
-3. Once every high-stakes question (if any) is answered, restate the fully-specified request in
-   one paragraph, **including a short list of the assumptions you made on the user's behalf**
-   for anything you decided yourself in step 2 — visible and easy to correct if you guessed
-   wrong, without having required an answer to reach this point.
+Run this as a loop, not a single pass — answers routinely surface new gaps.
+
+1. Read the request and list every place your understanding of the problem is incomplete: what's
+   actually being asked for, who it's for, scope boundaries (what's explicitly out), constraints
+   (performance, compatibility, deadline), and success criteria (how would anyone — technical or
+   not — know this is done and correct).
+2. Sort each unknown into one of the two piles from the principle above. Implementation minutiae:
+   decide it, note it, move on. Anything about the problem itself: it goes to the user, no matter
+   how minor it looks.
+3. Ask the problem-understanding questions through the `AskUserQuestion` tool — it's the default
+   for every question this skill asks, batched a few at a time (up to the tool's per-call limit),
+   using its free-text "Other" option for anything that doesn't reduce to a clean choice. Fall
+   back to plain conversational text only when a question genuinely needs an open-ended answer no
+   option list could capture.
+4. Re-read the answers against the same list. Answers routinely open new sub-questions — "the
+   export is for auditors" invites "audited against what standard?" — and if any surface, loop
+   back to step 3. Do not proceed while a genuine gap remains.
+5. Only once no gap in the problem itself remains, move to Finalization below.
+
+A caller with no user attached (`--non-interactive`) cannot hold this conversation. In that case,
+resolve every gap — problem-level included — with your best-effort judgment, and make each one a
+maximally visible stated assumption in the finalization summary instead of blocking on an answer
+nobody can give.
+
+## Finalization
+
+Once every gap is closed, tell the user what you now understand — in a form a technical and a
+non-technical reader can both follow. Skip jargon and internal plumbing (modes, specialists,
+phases, run types); describe the problem, not the pipeline that will solve it.
+
+Cover, in plain prose:
+
+- **The problem** — what's wrong or missing today, in the user's own terms.
+- **Who it's for** — the person or system that benefits.
+- **What will be built** — the shape of the solution, not its implementation.
+- **What's explicitly out of scope** — so "done" has an edge.
+- **How success will be judged** — the test anyone could apply after the fact.
+- **Assumptions made on your behalf** — the implementation-minutiae decisions from step 2 of the
+  Process loop, listed briefly so they're easy to correct if wrong.
+
+Ask the user to confirm this understanding is right before moving on. Treat a correction here the
+same as a gap found in the Process loop: resolve it and re-check, don't patch around it.
+
+Then ask, via `AskUserQuestion`:
+
+> **Would you like a visual (HTML) representation of this understanding?**
+> - **Yes** — generate one
+> - **No** — continue without one
+
+If yes, load the `artifact-design` skill, then build one simple, self-contained HTML page that
+mirrors the plain-prose summary above (problem, scope, success criteria) and publish it with the
+`Artifact` tool. This is a one-time understanding check for the user, not a polished deliverable
+— keep it modest. Share the link and continue; a "no" here doesn't block the handoff.
 
 ## Sizing the run
 
@@ -119,8 +171,9 @@ prompts as if it were part of the requirement.
 
 ## Hand off
 
-Immediately after the restatement, invoke the `orchestrator` skill via the `Skill` tool, passing
-the fully-specified request (plus the stated assumptions, plus the mode, plus the run type the
+Immediately after finalization, invoke the `orchestrator` skill via the `Skill` tool, passing
+the fully-specified request (plus the confirmed understanding and stated assumptions, plus the
+mode, plus the run type the
 user picked in your first action — `--plan-only` for a plan-only run, `--full-run` for a full one
 — plus `--non-interactive` and `--tasks-per-pass N` verbatim if they were passed to you) as its
 argument. Do not attempt any of the orchestrator's work yourself — routing, fan-out, review
