@@ -1,5 +1,5 @@
 ---
-description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only run or a full run, then turns a raw, possibly ambiguous request into a fully-specified one through a real back-and-forth with the user via AskUserQuestion, with zero tolerance for gaps in understanding the problem (implementation minutiae are still resolved autonomously), presents its finalized understanding in plain language with an optional generated HTML visual, then hands off to the orchestrator skill to actually build it.
+description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only run or a full run, how much scrutiny it should get (mode), and whether to force all specialists, then turns a raw, possibly ambiguous request into a fully-specified one through a real back-and-forth with the user via AskUserQuestion, with zero tolerance for gaps in understanding the problem (implementation minutiae are still resolved autonomously), presents its finalized understanding in plain language with an optional generated HTML visual, then hands off to the orchestrator skill to actually build it.
 argument-hint: Request [mode=lite|full|micro] [--all] [--plan-only]
 ---
 
@@ -13,18 +13,47 @@ success will be judged — then hand off.
 
 Initial input: $ARGUMENTS
 
-## First action: plan-only or full run
+## First action: run type, mode, and specialist coverage
 
-**Before clarifying questions, before reading any code, before anything else**, ask exactly one
-question with `AskUserQuestion`:
+**Before clarifying questions, before reading any code, before anything else**, resolve three
+things about how this run will be shaped: the **run type**, the **mode**, and whether to **force
+all specialists**. Each is skipped and taken straight from `$ARGUMENTS` when an explicit flag
+already answers it; otherwise ask via `AskUserQuestion`.
 
-> **Is this a plan-only run, or should it continue into implementation?**
-> - **Plan only** — stop after planning and ask before implementing
-> - **Full run** — continue into implementation
+1. **Run type and mode**, asked together in one `AskUserQuestion` call (batch both questions in
+   the same call; skip either one whose flag is already present in `$ARGUMENTS`):
 
-That answer is the run's **run type**, and it holds for the rest of the session. It is a
-different axis from `mode=` below (which sizes how much scrutiny the request gets, not whether
-the user is asked before code is written), and it sets two things:
+   > **Is this a plan-only run, or should it continue into implementation?**
+   > - **Plan only** — stop after planning and ask before implementing
+   > - **Full run** — continue into implementation
+
+   > **How much scrutiny should this run get?**
+   > - **Full** — every routed specialist, up to 3 review rounds each. For real features, anything
+   >   touching architecture or data, anything you'd want a second opinion on.
+   > - **Lite** — routing capped at 4 specialists, 1 review round. For small, well-understood work
+   >   that still deserves a spec.
+   > - **Micro** — no specialists, no review: straight to decomposition and execution. For work
+   >   that's already fully specified by its own one-sentence statement — a typo, a rename, a
+   >   config value.
+
+   Skip the run-type question only when `--plan-only` or `--full-run` is present — the flag *is*
+   the answer. **The two are mutually exclusive**; if both are present, stop immediately and say
+   so rather than picking one. Skip the mode question only when `mode=full`, `mode=lite`, or
+   `mode=micro` is present.
+
+2. **Force all specialists**, asked next — only when the resolved mode (from the flag or the
+   answer above) is `full` or `lite`, never `micro` (which has no specialist phase), and only when
+   `--all` isn't already in `$ARGUMENTS`:
+
+   > **Should this run force all 8 specialists (design, architecture, research, security,
+   > test-planning, cost-estimation, ux-copy, data-schema), skipping the routing judgment?**
+   > - **No, let routing decide** (recommended) — only the specialists whose domain the request
+   >   actually touches
+   > - **Yes, run all 8** — more thorough, but every extra specialist costs a full review loop
+
+The **run type** holds for the rest of the session and is a different axis from **mode** (which
+sizes how much scrutiny the request gets, not whether the user is asked before code is written).
+It sets two things:
 
 - **the implementation gate** — a *full run* enters implementation with no confirmation and is
   never asked to approve it again; a *plan-only* run stops at the implementation boundary and
@@ -35,14 +64,14 @@ the user is asked before code is written), and it sets two things:
 Execution itself pauses once per pass in *both* run types, to ask how many tasks to run in
 parallel next. That prompt is not affected by this answer; only its ceiling is.
 
-Skip the question only when `$ARGUMENTS` already answers it: `--plan-only` for a plan-only run,
-`--full-run` for a full one — the flag *is* the answer. **The two are mutually exclusive**; if
-both are present, stop immediately and say so rather than picking one. Either way, state the run
-type in your handoff so the orchestrator records it in `run.json`.
+State all three in your handoff so the orchestrator records them in `run.json`.
 
-A caller with no user attached — an eval runner, a scripted invocation — passes a run-type flag
-alongside `--non-interactive` and `--tasks-per-pass N`, which together pre-answer both of the
-pipeline's standing questions. Pass all of them through untouched; the `orchestrator` skill
+A caller with no user attached — an eval runner, a scripted invocation — cannot answer any of
+these three questions. Resolve whichever isn't already flagged with your own best-effort judgment
+from the shape of the request instead of asking, and state what you picked as a visible assumption
+in the finalization summary. A scripted caller normally passes a run-type flag alongside
+`--non-interactive` and `--tasks-per-pass N`, which together pre-answer the pipeline's two
+standing questions downstream; pass all of them through untouched — the `orchestrator` skill
 validates them and records them in `run.json`. Never set `--non-interactive` yourself, and never
 infer it: a question you cannot get an answer to is not evidence that nobody is there.
 
@@ -126,8 +155,9 @@ mirrors the plain-prose summary above (problem, scope, success criteria) and pub
 
 ## Sizing the run
 
-The orchestrator runs in one of three modes, and picking the wrong one wastes either money or
-quality. Pass the mode through in your handoff:
+Run type, mode, and `--all` are already resolved in First Action above — this table is what each
+mode means, for reference while asking that question and while stating assumptions in a
+non-interactive fallback:
 
 | | `full` | `lite` | `micro` |
 |---|---|---|---|
@@ -139,41 +169,15 @@ quality. Pass the mode through in your handoff:
 The mode sizes scrutiny and spend only. How many tasks run in parallel at once is set by the run
 type (3 per pass in a full run, uncapped in a plan-only run), not by the mode.
 
-- **`mode=full`** — every routed specialist, up to 3 review rounds each. Right for real features,
-  anything touching architecture or data, anything you'd want a second opinion on. This is also
-  the fallback when the request genuinely doesn't tell you which way to go: over-reviewing costs
-  money, under-reviewing costs correctness.
-- **`mode=lite`** — routing capped at 4 specialists, 1 review round. Right for small,
-  well-understood, moderately-scoped work where a full adversarial pass is overkill but the
-  request still deserves a spec.
-- **`mode=micro`** — no specialists, no spec review: the request goes straight to task
-  decomposition and execution, a handful of agents in total. Right for work that is *already*
-  fully specified by its own one-sentence statement — a typo fix, a rename, a config value, a
-  single obvious test. If you had to resolve any real ambiguity in step 2, it isn't micro.
-
-`--all` is separate from the mode and forces all 8 specialists, skipping the routing judgment in
-Phase 1. It combines with `full` or `lite`; it is incompatible with `micro` (which has no
-specialist phase). `--plan-only` and `--full-run` are separate too — they are the run type, not
-the mode: they pre-answer the question above, so a plan-only run stops at the implementation
-boundary and asks before starting any work, and a full run goes straight in. Pass them through
-untouched.
-
-Choose the mode yourself from the shape of the request rather than asking, and say which you
-picked in one clause.
-
-**An explicit flag in `$ARGUMENTS` overrides your judgment.** If the user passed `mode=lite`,
-`mode=full`, `mode=micro`, `--all`, `--plan-only`, or `--full-run`, honour it and pass it
-straight through — including `mode=full` on a request you'd have sized as `micro` yourself.
-They know something
-about the stakes that the request text doesn't carry. Strip the flag from the request text you
-restate — including `--tasks-per-pass`'s number — so it doesn't leak into the specialists'
+Whichever way mode and `--all` were resolved — flag or answer — strip them from the request text
+you restate, including `--tasks-per-pass`'s number, so none of it leaks into the specialists'
 prompts as if it were part of the requirement.
 
 ## Hand off
 
 Immediately after finalization, invoke the `orchestrator` skill via the `Skill` tool, passing
 the fully-specified request (plus the confirmed understanding and stated assumptions, plus the
-mode, plus the run type the
+mode, plus `--all` if it was resolved to yes, plus the run type the
 user picked in your first action — `--plan-only` for a plan-only run, `--full-run` for a full one
 — plus `--non-interactive` and `--tasks-per-pass N` verbatim if they were passed to you) as its
 argument. Do not attempt any of the orchestrator's work yourself — routing, fan-out, review
