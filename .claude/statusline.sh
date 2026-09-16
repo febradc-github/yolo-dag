@@ -120,9 +120,48 @@ fi
 
 # --- 4. current session usage, as a bar (5-hour rate-limit window) ---
 # `rate_limits` is present only for claude.ai Pro/Max subscribers (or behind a
-# spend-limit gateway) and only after the first API response; `five_hour` can
-# also disappear once its own resets_at passes. Omitted cleanly in all cases.
+# spend-limit gateway), and — unlike context_window — it doesn't exist in the
+# payload AT ALL until the first API response of the session. That's the gap
+# reported: "when there is no conversation, session isn't showing." It can't
+# be defaulted to 0% the way context was: the 5-hour window is account-wide,
+# not reset by starting a new conversation, so at the start of a fresh
+# session it's very likely genuinely non-zero, just not yet known here.
+#
+# The honest fix is to remember the last real reading rather than invent one:
+# every time a live value comes in, cache it alongside its own `resets_at`;
+# when the payload has no live value, fall back to that cache but ONLY while
+# `resets_at` hasn't passed yet — a cached value from an already-reset window
+# would be wrong, not just stale. A cached fallback is marked with a leading
+# `~` so it's never mistaken for a live reading.
+session_cache_dir="$HOME/.cache/yolo-dag-statusline"
+session_cache_file="$session_cache_dir/session_rate_limit"
+
 session_pct="$(jget '.rate_limits.five_hour.used_percentage // empty')"
+session_is_live=0
+if [ -n "$session_pct" ] && [ "$session_pct" != "null" ]; then
+    session_is_live=1
+    session_resets_at="$(jget '.rate_limits.five_hour.resets_at // empty')"
+    if [ -n "$session_resets_at" ] && [ "$session_resets_at" != "null" ]; then
+        mkdir -p "$session_cache_dir" 2>/dev/null || true
+        printf '%s\n%s\n' "$session_pct" "$session_resets_at" > "$session_cache_file" 2>/dev/null || true
+    fi
+else
+    now="$(date +%s 2>/dev/null || true)"
+    case "$now" in
+        ''|*[!0-9]*) : ;;  # can't tell the time — don't trust a cached value at all
+        *)
+            if [ -f "$session_cache_file" ]; then
+                cached_pct="$(sed -n '1p' "$session_cache_file" 2>/dev/null || true)"
+                cached_resets_at="$(sed -n '2p' "$session_cache_file" 2>/dev/null || true)"
+                case "$cached_resets_at" in
+                    ''|*[!0-9]*) : ;;
+                    *) [ "$now" -lt "$cached_resets_at" ] && session_pct="$cached_pct" ;;
+                esac
+            fi
+            ;;
+    esac
+fi
+
 if [ -n "$session_pct" ] && [ "$session_pct" != "null" ]; then
     session_int="$(printf '%.0f' "$session_pct" 2>/dev/null || true)"
     case "$session_int" in
@@ -139,7 +178,9 @@ if [ -n "$session_pct" ] && [ "$session_pct" != "null" ]; then
             i=0
             while [ "$i" -lt "$empty" ]; do bar="${bar}░"; i=$((i + 1)); done
             c_session="$(usage_color "$session_int")"
-            segments+=("${c_session}session:[${bar}] ${session_int}%${c_reset}")
+            approx=""
+            [ "$session_is_live" -eq 0 ] && approx="~"
+            segments+=("${c_session}session:[${bar}] ${approx}${session_int}%${c_reset}")
             ;;
     esac
 fi
