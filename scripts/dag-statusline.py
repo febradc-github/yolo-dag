@@ -18,6 +18,17 @@ thing, and this script used to conflate them (it walked up looking for
 scripts still require git deliberately — the DAG pipeline itself does — but
 that requirement never actually applied to the statusline.)
 
+"on" also **bootstraps** a statusline in the current directory if none is
+configured there yet, rather than requiring `/statusline` to be run manually
+first — the plugin is used from whatever repo the user is actually working
+in, not just yolo-dag's own, so each of those repos should be able to get its
+own local statusline straight from `/dag-statusline on`. The template it
+copies from is this same plugin's own `.claude/statusline.sh` (found relative
+to this script's own location, so it works whether this is running from the
+plugin's installed copy or a dev checkout) — copied into `<cwd>/.claude/`, so
+the result is self-contained and independently committable per repo, exactly
+like yolo-dag's own.
+
 Like most settings.json edits, a change here may not affect the *current*
 session's rendered statusline until the next one starts — this script edits
 the file honestly and says what it did; it doesn't claim to hot-apply it.
@@ -31,9 +42,15 @@ import json
 import sys
 from pathlib import Path
 
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+
 
 def _settings_path(project_dir: Path) -> Path:
     return project_dir / ".claude" / "settings.json"
+
+
+def _template_statusline() -> Path:
+    return PLUGIN_ROOT / ".claude" / "statusline.sh"
 
 
 def _load(path: Path) -> dict:
@@ -59,7 +76,8 @@ def cmd_status(path: Path) -> None:
     elif "_statusLineDisabled" in data:
         print(f"statusline: off ({path}) — configuration preserved, run `on` to restore it")
     else:
-        print(f"statusline: not configured ({path} has no statusLine key)")
+        print(f"statusline: not configured ({path} has no statusLine key) — "
+              f"run `on` to set one up here")
 
 
 def cmd_off(path: Path) -> None:
@@ -68,7 +86,7 @@ def cmd_off(path: Path) -> None:
         if "_statusLineDisabled" in data:
             print("statusline: already off.")
         else:
-            print("statusline: nothing configured — nothing to turn off. Run /statusline first.")
+            print("statusline: nothing configured — nothing to turn off.")
         return
     data["_statusLineDisabled"] = data.pop("statusLine")
     _save(path, data)
@@ -81,13 +99,33 @@ def cmd_on(path: Path) -> None:
     if "statusLine" in data:
         print("statusline: already on.")
         return
-    if "_statusLineDisabled" not in data:
-        print("statusline: nothing to turn on — no statusline has been configured yet. "
-              "Run /statusline to set one up.")
+    if "_statusLineDisabled" in data:
+        data["statusLine"] = data.pop("_statusLineDisabled")
+        _save(path, data)
+        print(f"statusline: on, restored in {path}. Takes effect next session.")
         return
-    data["statusLine"] = data.pop("_statusLineDisabled")
+
+    # Nothing configured here at all — bootstrap it from the plugin's own
+    # template instead of requiring /statusline to be run manually first.
+    template = _template_statusline()
+    if not template.exists():
+        print(f"statusline: nothing configured, and no template found at {template} to set "
+              f"one up from. Run /statusline in this directory instead.")
+        return
+
+    target_script = path.parent / "statusline.sh"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        target_script.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+        target_script.chmod(0o755)
+    except OSError as exc:
+        print(f"statusline: could not set up {target_script}: {exc!r}")
+        return
+
+    data["statusLine"] = {"type": "command", "command": "bash .claude/statusline.sh"}
     _save(path, data)
-    print(f"statusline: on, restored in {path}. Takes effect next session.")
+    print(f"statusline: set up and on in {path} (script copied to {target_script} from this "
+          f"plugin's template). Takes effect next session.")
 
 
 def main() -> int:
