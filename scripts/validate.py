@@ -393,6 +393,63 @@ def check_run_json_schema() -> None:
                  f"in skills/orchestrator/SKILL.md")
 
 
+def check_meter_hooks() -> None:
+    """Structural checks for hooks/hooks.json, meter's M0 (Ledger) milestone.
+    Covers meter-handoff.md Section 6.6 items 1 (real hook event names), 2
+    (command-hook script paths exist), and 8 (hooks.json's port matches
+    meter/config.py's default) — the only items relevant while M0 is the only
+    milestone shipped. Items 3-5 and 7 (receipt schema, config keys named in
+    commands/README) are deferred to whichever milestone introduces receipts
+    and the rest of the config surface."""
+    hooks_path = ROOT / "hooks" / "hooks.json"
+    if not hooks_path.exists():
+        return  # meter not present in this checkout; nothing to check
+
+    try:
+        data = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"hooks/hooks.json: {exc}")
+        return
+
+    # As of 2026-09-16 (meter-handoff.md Appendix A / the Claude Code hooks
+    # reference). Dated because this surface moves fast — re-check before trusting it.
+    valid_hook_events = {
+        "SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "PostToolBatch",
+        "SubagentStart", "SubagentStop", "Stop", "PreCompact", "UserPromptSubmit",
+        "Notification",
+    }
+
+    try:
+        sys.path.insert(0, str(ROOT))
+        from meter import config as meter_config  # noqa: PLC0415
+        default_port = meter_config.DEFAULT_PORT
+    except Exception:
+        default_port = None
+
+    for event_name, entries in data.get("hooks", {}).items():
+        if event_name not in valid_hook_events:
+            fail(f"hooks/hooks.json: unknown hook event {event_name!r}")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            for h in entry.get("hooks", []):
+                htype = h.get("type")
+                if htype == "command":
+                    args = h.get("args", [])
+                    if not args:
+                        fail(f"hooks/hooks.json: {event_name} command hook has no `args`")
+                        continue
+                    script = args[0].replace("${CLAUDE_PLUGIN_ROOT}", str(ROOT))
+                    if not Path(script).exists():
+                        fail(f"hooks/hooks.json: {event_name} command hook script "
+                             f"missing on disk: {args[0]}")
+                elif htype == "http" and default_port is not None:
+                    m = re.search(r":(\d+)/", h.get("url", ""))
+                    if m and int(m.group(1)) != default_port:
+                        fail(f"hooks/hooks.json: {event_name} URL port {m.group(1)} does not "
+                             f"match meter/config.py's DEFAULT_PORT {default_port}")
+
+
 def check_evals() -> None:
     """Each eval case's declared name must match its directory, or --case filtering and
     the results layout silently target the wrong case."""
@@ -426,6 +483,7 @@ def main() -> int:
     check_flags()
     check_hint_length()
     check_run_json_schema()
+    check_meter_hooks()
     check_evals()
 
     for w in warnings:

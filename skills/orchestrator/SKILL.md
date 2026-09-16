@@ -128,6 +128,11 @@ is asked per pass in Phase 5, capped at 3 in a full run and uncapped in a plan-o
 }
 ```
 
+   `run.json` may also carry a `meter` key, written and read only by the `meter` subsystem if
+   it's installed (see `meter-handoff.md`) — never write it yourself, and never treat its absence
+   as an error; it's additive state for a separate, optional tool, not part of this skill's own
+   schema.
+
    In `micro` mode, phases 1–3 start as `"skipped"`. Mark each phase `"complete"` in `run.json`
    only after its artifacts are fully written — a phase whose entry still says `"pending"` or
    `"in_progress"` did not complete, however plausible its half-written markdown looks.
@@ -169,6 +174,14 @@ run two tasks with overlapping ownership in the same pass regardless.
   `run_in_background: true` so batches genuinely run concurrently. Only the single Phase 4
   `task-specialist` call is a reasonable candidate for `run_in_background: false`, since nothing
   else can proceed until it returns anyway.
+- **Meter attribution line (inert if the `meter` subsystem isn't installed).** Prefix every
+  `Agent` spawn's `prompt` with one line, `DAG-NODE: <run-id>/<node-id>`, before the task content
+  itself — `<node-id>` is `P1-<specialist>` in Phase 1, `P2-<specialist>-r<round>-<angle>` for a
+  reviewer or `P2-<specialist>-r<round>-consolidator` for the consolidator in Phase 2,
+  `P3-reconciler` in Phase 3, `P4-task-specialist` in Phase 4, `<task-id>-worker` /
+  `<task-id>-reviewer` in Phase 5, `P6-integration-reviewer` in Phase 6. This is plain metadata a
+  local measurement tool may read to attribute token spend to a node; nothing reads it and
+  nothing about this skill's behavior depends on it if that tool isn't present.
 - **Resume by name, never respawn.** A specialist's multi-round revision (Phase 2), its Phase 3
   reconciliation, and a Phase 5 worker's rework after a FLAGGED review are always a `SendMessage`
   addressed to that agent's own spawn name — this resumes it with full context, and in the

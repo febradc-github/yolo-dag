@@ -302,6 +302,24 @@ in parallel (anything with no unresolved edges pointing into it).
   feedback paths: a contract can be revised once, and when most task failures classify the *spec*
   as the problem, the graph goes back to `task-specialist` for correction exactly once per run.
 
+## Meter (optional, measurement only)
+
+`meter` is a local, zero-network subsystem, shipped inside this plugin, that measures real
+per-node token spend via Claude Code's hooks — see [`meter-handoff.md`](meter-handoff.md) for the
+full design. **Only its first milestone is implemented: the Ledger.** It measures and changes
+nothing else about how a run behaves — no tool input or output is ever rewritten by it. Later
+milestones (context packs, output compression, a patch cache, budget recalibration) don't ship
+until the Ledger has produced real numbers against real runs.
+
+It starts itself on `SessionStart` (a loopback-only daemon on `127.0.0.1:47615` by default) and
+reports via `/dag-cost <run-id>`. Run `python3 scripts/dag-doctor.py` any time to see its
+capability matrix, including which of its own design assumptions are still unverified against
+your Claude Code install.
+
+**To turn it off entirely**, any of: `DAG_METER_DISABLE=1`, `{"enabled": false}` in
+`.dag/meter.json`, or Claude Code's own `disableAllHooks`. With it off, this plugin is byte-for-
+byte its current self.
+
 ## Structure
 
 ```
@@ -314,7 +332,10 @@ yolo-dag/
 │   ├── dag-status.md            # inspect one run in detail
 │   ├── dag-resume.md            # resume an interrupted (or --plan-only) run
 │   ├── dag-cancel.md            # stop an in-flight run, resumably
-│   └── dag-clean.md             # prune worktrees, run state, and (with confirmation) branches
+│   ├── dag-clean.md             # prune worktrees, run state, and (with confirmation) branches
+│   └── dag-cost.md              # measured token spend for one run, from meter's Ledger
+├── hooks/hooks.json              # meter's Claude Code hook registration (M0 subset)
+├── meter/                        # meter's package — see meter-handoff.md; M0 (Ledger) only
 ├── agents/
 │   ├── design-specialist.md
 │   ├── architecture-specialist.md
@@ -332,7 +353,11 @@ yolo-dag/
 │   ├── task-reviewer.md         # generic role, verifies inside the worker's worktree
 │   └── integration-reviewer.md  # spawned once in Phase 6; reviews the whole diff against the request
 ├── evals/                       # behavioural eval suite (see evals/README.md)
-└── scripts/validate.py          # structural validator, run in CI
+└── scripts/
+    ├── validate.py               # structural validator, run in CI
+    ├── dag-doctor.py             # meter's capability matrix and VERIFY probes
+    ├── meter-boot.py             # meter's SessionStart hook (starts/refcounts the daemon)
+    └── meter-hook.py             # meter's SessionEnd hook (main-thread accounting, refcounting)
 ```
 
 ## Development
@@ -349,6 +374,10 @@ literal status-line contracts the orchestrator branches on — `VERDICT: PASS`, 
 both ends, the mode table is identical in the three files that state it, every documented flag is
 one the orchestrator parses, and the `run.json` keys the commands read are keys the orchestrator
 writes. It runs on a bare Python 3 with no dependencies, in CI on every push.
+
+`python3 scripts/dag-doctor.py` checks meter's own prerequisites separately (Python version,
+loopback bind, and which of its design assumptions about Claude Code's hook payloads are still
+unverified) — see [Meter](#meter-optional-measurement-only) above.
 
 The behavioural eval suite lives in [evals/](evals/) and runs with `claude plugin eval .`. It is
 authored but **unexecuted** — `plugin eval` is gated behind early access — so treat its schema as
