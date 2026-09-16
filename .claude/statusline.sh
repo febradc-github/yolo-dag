@@ -20,6 +20,15 @@ input="$(cat 2>/dev/null || true)"
 have_jq=0
 command -v jq >/dev/null 2>&1 && have_jq=1
 
+# Distinct from have_jq: whether the input actually parses. jget() can't tell
+# "the field is null" apart from "jq couldn't even read this" — both print
+# nothing — and that distinction matters wherever a filter defaults a missing
+# value to something other than empty (see the context-window segment below).
+valid_json=0
+if [ "$have_jq" -eq 1 ]; then
+    printf '%s' "$input" | jq -e . >/dev/null 2>&1 && valid_json=1
+fi
+
 # jget <jq-filter> — prints the filtered value, or empty on any failure
 # (no jq installed, invalid JSON, absent key). Never errors the script.
 jget() {
@@ -135,17 +144,22 @@ if [ -n "$session_pct" ] && [ "$session_pct" != "null" ]; then
     esac
 fi
 
-# --- 5. context window usage, as a pie-style glyph (omitted if the field is
-# absent — e.g. before the first API response, when used_percentage is null).
+# --- 5. context window usage, as a pie-style glyph. Defaults to 0 rather
+# than omitting when the field is null/absent — that's what a fresh session
+# and a just-/clear'd one both look like (no API call yet this "session"),
+# and 0% is the true value in both cases, not a stale one. (This is also what
+# Claude Code's own example status-line scripts do: `used_percentage // 0`,
+# not `// empty`.) `session` below stays omit-on-absent deliberately — that
+# field means "not applicable to this account," not "zero."
 # A real circle can't render in a terminal; the closest honest equivalent is
 # the standard quarter-circle glyph set (○ ◔ ◑ ◕ ●), rounded to the nearest
 # quarter, with the exact percentage printed alongside so nothing is lost to
 # the rounding — the glyph is symbolic, the number next to it is exact. ---
-ctx_pct="$(jget '.context_window.used_percentage // empty')"
-if [ -n "$ctx_pct" ] && [ "$ctx_pct" != "null" ]; then
+if [ "$valid_json" -eq 1 ]; then
+    ctx_pct="$(jget '.context_window.used_percentage // 0')"
     ctx_int="$(printf '%.0f' "$ctx_pct" 2>/dev/null || true)"
     case "$ctx_int" in
-        ''|*[!0-9]*) : ;;
+        ''|*[!0-9]*) : ;;  # jq produced garbage despite being present — drop the segment
         *)
             [ "$ctx_int" -gt 100 ] && ctx_int=100
             if [ "$ctx_int" -ge 88 ]; then pie="●"
@@ -159,6 +173,10 @@ if [ -n "$ctx_pct" ] && [ "$ctx_pct" != "null" ]; then
             ;;
     esac
 fi
+# valid_json == 0 (no jq, or the input itself didn't parse): we genuinely
+# can't tell "fresh session" from "couldn't read this," so omit rather than
+# default to 0 — that default only applies once jq has actually confirmed
+# the field is null/absent in otherwise-valid JSON.
 
 # --- assemble ---
 out=""
