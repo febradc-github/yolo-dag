@@ -8,7 +8,7 @@ allowed-tools: ["Read", "Glob", "Bash"]
 
 Target run: `$ARGUMENTS` — if empty, use the most recent directory under `.dag/runs/`.
 
-meter is a separate, optional plugin subsystem (see `meter-handoff.md`) that measures real
+meter is a separate plugin subsystem, on by default (see `meter-handoff.md`), that measures real
 token spend per DAG node via Claude Code's hooks. As of this version, only its M0 milestone
 (the Ledger) is implemented — it measures and changes nothing else about how the pipeline runs.
 Nothing else in this command depends on meter being installed, enabled, or having run: if its

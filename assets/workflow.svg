@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1400" width="1560" height="1400" role="img" aria-labelledby="title desc">
   <title id="title">yolo-dag workflow</title>
-  <desc id="desc">brainstorm asks whether this is a plan-only run or a full run, resolves ambiguity, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables and reconciles contradictions between them into one build spec, decomposes it into independent tasks bound by shared contracts, then enters implementation directly on a full run or asks first on a plan-only run, executing in user-paced passes of worktree-isolated workers — one number asked per pass, the orchestrator picking the tasks — merging each approved task onto the integration branch, then verifies the assembled branch with the full suite and an acceptance review against the original request.</desc>
+  <desc id="desc">brainstorm asks whether this is a plan-only run or a full run, resolves ambiguity, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges their deliverables and reconciles contradictions between them into one build spec, decomposes it into independent tasks bound by shared contracts, then enters implementation directly on a full run or asks first on a plan-only run, executing in user-paced passes of worktree-isolated workers — one number asked per pass, the orchestrator picking the tasks — merging each approved task onto the integration branch, then verifies the assembled branch with the full suite and an acceptance review against the original request. meter, a local subsystem on by default, observes every spawn from start to finish to measure real token spend, reported at /dag-cost, without changing any of the above.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -23,6 +23,12 @@
   <rect x="650" y="40" width="260" height="76" rx="14" fill="#242229" stroke="#e2a33f" stroke-width="2" filter="url(#soft)"/>
   <text x="780" y="76" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="600" fill="#e2a33f">/brainstorm</text>
   <text x="780" y="100" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#9d978c">entrypoint &#183; asks plan-only or full run &#183; resolves ambiguity &#183; sizes it (full / lite / micro)</text>
+
+  <!-- meter: on-by-default side-observer, not a pipeline stage — bookend badge #1 -->
+  <rect x="1140" y="40" width="380" height="76" rx="14" fill="#242229" stroke="#9a8fd1" stroke-width="1.5" stroke-dasharray="5 4" filter="url(#soft)"/>
+  <text x="1330" y="70" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#9a8fd1">meter (on by default)</text>
+  <text x="1330" y="92" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">observes every spawn below, start to finish</text>
+  <text x="1330" y="109" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">measures tokens, changes nothing shown here</text>
 
   <line x1="780" y1="116" x2="780" y2="150" stroke="#726d7d" stroke-width="2" marker-end="url(#arrow)"/>
 
@@ -167,6 +173,12 @@
   <text x="780" y="1328" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#e2a33f">done</text>
   <text x="780" y="1350" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">a branch for the user to review</text>
 
+  <!-- meter: on-by-default side-observer — bookend badge #2 -->
+  <rect x="1140" y="1298" width="380" height="68" rx="14" fill="#242229" stroke="#9a8fd1" stroke-width="1.5" stroke-dasharray="5 4" filter="url(#soft)"/>
+  <text x="1330" y="1324" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#9a8fd1">/dag-cost</text>
+  <text x="1330" y="1345" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">measured tokens per node vs. the spawn-unit estimate</text>
+  <text x="1330" y="1360" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#9d978c">M0 (Ledger) only — see meter-handoff.md</text>
+
   <!-- Legend -->
-  <text x="780" y="1390" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c"><tspan fill="#726d7d" font-weight="700">&#8594;</tspan> one-way flow (DAG edge) &#160;&#160;&#160;&#160; <tspan fill="#5fb0a6" font-weight="700">&#8635;</tspan> bounded loop (capped rounds / reworks) &#160;&#160;&#160;&#160; <tspan fill="#e2a33f" font-weight="700">&#9633;</tspan> always routed &#160;&#160;&#160;&#160; <tspan fill="#4a4653" font-weight="700">&#9633;</tspan> routed when relevant</text>
+  <text x="780" y="1390" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#9d978c"><tspan fill="#726d7d" font-weight="700">&#8594;</tspan> one-way flow (DAG edge) &#160;&#160;&#160;&#160; <tspan fill="#5fb0a6" font-weight="700">&#8635;</tspan> bounded loop (capped rounds / reworks) &#160;&#160;&#160;&#160; <tspan fill="#e2a33f" font-weight="700">&#9633;</tspan> always routed &#160;&#160;&#160;&#160; <tspan fill="#4a4653" font-weight="700">&#9633;</tspan> routed when relevant &#160;&#160;&#160;&#160; <tspan fill="#9a8fd1" font-weight="700">&#9633;</tspan> meter (on by default, observes only)</text>
 </svg>

@@ -6,6 +6,9 @@ with bounded loops" below).
 
 ![yolo-dag workflow: /brainstorm asks whether this is a plan-only run or a full run, sizes the run, and hands off to the orchestrator, which routes the request to the relevant domain specialists, runs a bounded adversarial review loop per specialist, merges and reconciles their deliverables into one build spec, decomposes it into independent tasks bound by shared contracts, then implements directly on a full run or asks first on a plan-only run — executing in user-paced passes, one number asked per pass and the orchestrator picking the tasks, merging each approved task onto the integration branch — then verifies the assembled branch with the full suite and an acceptance review against the original request](assets/workflow.jpeg)
 
+A more literal, kept-current diagram of the same flow — including where `meter` (on by default)
+sits — is in [`assets/workflow.svg`](assets/workflow.svg).
+
 ## Workflow
 
 Run `/brainstorm <your request>`:
@@ -302,23 +305,33 @@ in parallel (anything with no unresolved edges pointing into it).
   feedback paths: a contract can be revised once, and when most task failures classify the *spec*
   as the problem, the graph goes back to `task-specialist` for correction exactly once per run.
 
-## Meter (optional, measurement only)
+## Meter (on by default, measurement only)
 
-`meter` is a local, zero-network subsystem, shipped inside this plugin, that measures real
-per-node token spend via Claude Code's hooks — see [`meter-handoff.md`](meter-handoff.md) for the
-full design. **Only its first milestone is implemented: the Ledger.** It measures and changes
-nothing else about how a run behaves — no tool input or output is ever rewritten by it. Later
-milestones (context packs, output compression, a patch cache, budget recalibration) don't ship
-until the Ledger has produced real numbers against real runs.
+`meter` is a local, zero-network subsystem, shipped inside this plugin and **on by default**,
+that measures real per-node token spend via Claude Code's hooks — see
+[`meter-handoff.md`](meter-handoff.md) for the full design. **Only its first milestone is
+implemented: the Ledger.** It measures and changes nothing else about how a run behaves — no tool
+input or output is ever rewritten by it. Later milestones (context packs, output compression, a
+patch cache, budget recalibration) don't ship until the Ledger has produced real numbers against
+real runs.
 
 It starts itself on `SessionStart` (a loopback-only daemon on `127.0.0.1:47615` by default) and
 reports via `/dag-cost <run-id>`. Run `python3 scripts/dag-doctor.py` any time to see its
 capability matrix, including which of its own design assumptions are still unverified against
 your Claude Code install.
 
-**To turn it off entirely**, any of: `DAG_METER_DISABLE=1`, `{"enabled": false}` in
-`.dag/meter.json`, or Claude Code's own `disableAllHooks`. With it off, this plugin is byte-for-
-byte its current self.
+Its HTTP hooks authenticate with a token, but only advisorily: Claude Code has no documented way
+for a `SessionStart` hook to hand a freshly generated secret to the hooks that fire afterward, so
+an unauthenticated local request is still processed rather than rejected — safe here because this
+milestone only ever *observes* (no hook response from it ever rewrites a tool's input or output).
+`dag-doctor` reports the authenticated/unauthenticated split so you can see whether your
+environment happens to wire the token through.
+
+**To turn it off** (or back on), run `/dag-meter off` / `/dag-meter on` — `/dag-meter status`
+reports whether it's currently running. It persists the choice to `.dag/meter.json` for every
+future session, and also stops (or starts) this session's daemon immediately where it can. The
+same switch by hand: `DAG_METER_DISABLE=1`, `{"enabled": false}` in `.dag/meter.json`, or Claude
+Code's own `disableAllHooks`. With it off, this plugin is byte-for-byte its current self.
 
 ## Structure
 
@@ -333,7 +346,8 @@ yolo-dag/
 │   ├── dag-resume.md            # resume an interrupted (or --plan-only) run
 │   ├── dag-cancel.md            # stop an in-flight run, resumably
 │   ├── dag-clean.md             # prune worktrees, run state, and (with confirmation) branches
-│   └── dag-cost.md              # measured token spend for one run, from meter's Ledger
+│   ├── dag-cost.md              # measured token spend for one run, from meter's Ledger
+│   └── dag-meter.md             # turn meter on/off, or check whether it's running
 ├── hooks/hooks.json              # meter's Claude Code hook registration (M0 subset)
 ├── meter/                        # meter's package — see meter-handoff.md; M0 (Ledger) only
 ├── agents/
@@ -356,6 +370,7 @@ yolo-dag/
 └── scripts/
     ├── validate.py               # structural validator, run in CI
     ├── dag-doctor.py             # meter's capability matrix and VERIFY probes
+    ├── dag-meter.py              # meter's on/off/status CLI, behind /dag-meter
     ├── meter-boot.py             # meter's SessionStart hook (starts/refcounts the daemon)
     └── meter-hook.py             # meter's SessionEnd hook (main-thread accounting, refcounting)
 ```
@@ -377,7 +392,7 @@ writes. It runs on a bare Python 3 with no dependencies, in CI on every push.
 
 `python3 scripts/dag-doctor.py` checks meter's own prerequisites separately (Python version,
 loopback bind, and which of its design assumptions about Claude Code's hook payloads are still
-unverified) — see [Meter](#meter-optional-measurement-only) above.
+unverified) — see [Meter](#meter-on-by-default-measurement-only) above.
 
 The behavioural eval suite lives in [evals/](evals/) and runs with `claude plugin eval .`. It is
 authored but **unexecuted** — `plugin eval` is gated behind early access — so treat its schema as
