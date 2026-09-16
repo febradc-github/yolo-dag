@@ -2,16 +2,11 @@
 # yolo-dag statusline — project-scoped, see .claude/settings.json.
 #
 # Prints, left to right: model | meter:on/off | git branch[*dirty] |
-# context-window usage bar.
+# session:[bar] pct% (5-hour rate-limit window) | context:<pie glyph> pct%.
 #
-# A 5th segment (count of currently-running background agents) was
-# requested but is intentionally NOT implemented: the documented Claude
-# Code statusline JSON payload has no field for it. The payload's `agent`
-# object only describes the current session's own --agent identity
-# (name/type) when Claude was started with --agent — it is not a live
-# count of concurrent background agents, and nothing else in the payload
-# carries one either. A shell script also has no independent way to
-# introspect that. Revisit if Claude Code ever adds such a field.
+# A "count of running background agents" segment was requested earlier but is
+# intentionally NOT implemented: the documented Claude Code statusline JSON
+# payload has no field for it. Revisit if Claude Code ever adds one.
 #
 # Hard rule: every segment is best-effort and fails SILENTLY. Missing data,
 # a missing tool (jq/git/curl), or a command error just drops that segment —
@@ -37,16 +32,26 @@ jget() {
 
 # --- palette (256-color; echoes assets/workflow.svg's grey/teal/gold/violet) ---
 c_reset=$'\033[0m'
-c_model=$'\033[38;5;79m'     # teal   (~#5fb0a6) — model name
-c_branch=$'\033[38;5;178m'   # gold   (~#e2a33f) — git branch
-c_dirty=$'\033[38;5;203m'    # soft red — dirty-tree marker only
-c_meter=$'\033[2;38;5;141m'  # dim + violet (~#9a8fd1) — meter, deliberately subtle
-c_ctx_ok=$'\033[38;5;109m'   # calm teal-grey — context usage < 70%
-c_ctx_warn=$'\033[38;5;178m' # gold — context usage 70-89%
-c_ctx_crit=$'\033[38;5;203m' # soft red — context usage >= 90%
-c_sepcol=$'\033[2m'          # dim separator
+c_model=$'\033[38;5;79m'       # teal   (~#5fb0a6) — model name
+c_branch=$'\033[38;5;178m'     # gold   (~#e2a33f) — git branch
+c_dirty=$'\033[38;5;203m'      # soft red — dirty-tree marker only
+c_meter=$'\033[2;38;5;141m'    # dim + violet (~#9a8fd1) — meter, deliberately subtle
+c_usage_ok=$'\033[38;5;109m'   # calm teal-grey — usage < 70%
+c_usage_warn=$'\033[38;5;178m' # gold — usage 70-89%
+c_usage_crit=$'\033[38;5;203m' # soft red — usage >= 90%
+c_sepcol=$'\033[2m'            # dim separator
 
 segments=()
+
+# usage_color <pct> — prints the threshold color for a 0-100 percentage,
+# shared by the session bar and the context pie so both read consistently.
+usage_color() {
+    pct="$1"
+    if [ "$pct" -ge 90 ]; then printf '%s' "$c_usage_crit"
+    elif [ "$pct" -ge 70 ]; then printf '%s' "$c_usage_warn"
+    else printf '%s' "$c_usage_ok"
+    fi
+}
 
 # --- 1. model ---
 model="$(jget '.model.display_name // .model.id // empty')"
@@ -104,17 +109,19 @@ if [ -n "$repo_root" ] && command -v git >/dev/null 2>&1; then
     fi
 fi
 
-# --- 4. context window usage, as a progress bar (omitted if the field is
-# absent — e.g. before the first API response, when used_percentage is null) ---
-ctx_pct="$(jget '.context_window.used_percentage // empty')"
-if [ -n "$ctx_pct" ] && [ "$ctx_pct" != "null" ]; then
-    ctx_int="$(printf '%.0f' "$ctx_pct" 2>/dev/null || true)"
-    case "$ctx_int" in
+# --- 4. current session usage, as a bar (5-hour rate-limit window) ---
+# `rate_limits` is present only for claude.ai Pro/Max subscribers (or behind a
+# spend-limit gateway) and only after the first API response; `five_hour` can
+# also disappear once its own resets_at passes. Omitted cleanly in all cases.
+session_pct="$(jget '.rate_limits.five_hour.used_percentage // empty')"
+if [ -n "$session_pct" ] && [ "$session_pct" != "null" ]; then
+    session_int="$(printf '%.0f' "$session_pct" 2>/dev/null || true)"
+    case "$session_int" in
         ''|*[!0-9]*) : ;;  # non-numeric after rounding — drop the segment
         *)
-            [ "$ctx_int" -gt 100 ] && ctx_int=100
+            [ "$session_int" -gt 100 ] && session_int=100
             width=10
-            filled=$(( ctx_int * width / 100 ))
+            filled=$(( session_int * width / 100 ))
             [ "$filled" -gt "$width" ] && filled=$width
             empty=$(( width - filled ))
             bar=""
@@ -122,14 +129,33 @@ if [ -n "$ctx_pct" ] && [ "$ctx_pct" != "null" ]; then
             while [ "$i" -lt "$filled" ]; do bar="${bar}█"; i=$((i + 1)); done
             i=0
             while [ "$i" -lt "$empty" ]; do bar="${bar}░"; i=$((i + 1)); done
-            if [ "$ctx_int" -ge 90 ]; then
-                c_ctx="$c_ctx_crit"
-            elif [ "$ctx_int" -ge 70 ]; then
-                c_ctx="$c_ctx_warn"
-            else
-                c_ctx="$c_ctx_ok"
+            c_session="$(usage_color "$session_int")"
+            segments+=("${c_session}session:[${bar}] ${session_int}%${c_reset}")
+            ;;
+    esac
+fi
+
+# --- 5. context window usage, as a pie-style glyph (omitted if the field is
+# absent — e.g. before the first API response, when used_percentage is null).
+# A real circle can't render in a terminal; the closest honest equivalent is
+# the standard quarter-circle glyph set (○ ◔ ◑ ◕ ●), rounded to the nearest
+# quarter, with the exact percentage printed alongside so nothing is lost to
+# the rounding — the glyph is symbolic, the number next to it is exact. ---
+ctx_pct="$(jget '.context_window.used_percentage // empty')"
+if [ -n "$ctx_pct" ] && [ "$ctx_pct" != "null" ]; then
+    ctx_int="$(printf '%.0f' "$ctx_pct" 2>/dev/null || true)"
+    case "$ctx_int" in
+        ''|*[!0-9]*) : ;;
+        *)
+            [ "$ctx_int" -gt 100 ] && ctx_int=100
+            if [ "$ctx_int" -ge 88 ]; then pie="●"
+            elif [ "$ctx_int" -ge 63 ]; then pie="◕"
+            elif [ "$ctx_int" -ge 38 ]; then pie="◑"
+            elif [ "$ctx_int" -ge 13 ]; then pie="◔"
+            else pie="○"
             fi
-            segments+=("${c_ctx}[${bar}] ${ctx_int}%${c_reset}")
+            c_ctx="$(usage_color "$ctx_int")"
+            segments+=("${c_ctx}context:${pie} ${ctx_int}%${c_reset}")
             ;;
     esac
 fi
