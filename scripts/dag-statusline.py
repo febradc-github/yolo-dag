@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for turning this repo's statusline on/off, or checking its state.
+"""CLI for turning this project directory's statusline on/off, or checking its state.
 
 Usage: python3 scripts/dag-statusline.py <on|off|status>
 
@@ -9,6 +9,14 @@ There's no separate enabled/disabled flag in that schema — "off" here means
 removing the key; "on" means putting it back. To do that without losing the
 configuration, "off" moves the value to `_statusLineDisabled` (a key name
 Claude Code itself ignores) instead of deleting it, and "on" moves it back.
+
+`.claude/settings.json` is scoped to a *project directory* (wherever Claude
+Code was launched from), not to a git repository — the two aren't the same
+thing, and this script used to conflate them (it walked up looking for
+`.git`, and refused to do anything outside one). Fixed: it operates on
+`<cwd>/.claude/settings.json` directly, no git involved. (`meter`'s own
+scripts still require git deliberately — the DAG pipeline itself does — but
+that requirement never actually applied to the statusline.)
 
 Like most settings.json edits, a change here may not affect the *current*
 session's rendered statusline until the next one starts — this script edits
@@ -24,16 +32,8 @@ import sys
 from pathlib import Path
 
 
-def find_repo_root(start: Path) -> Path | None:
-    cur = start.resolve()
-    for candidate in [cur, *cur.parents]:
-        if (candidate / ".git").exists():
-            return candidate
-    return None
-
-
-def _settings_path(repo_root: Path) -> Path:
-    return repo_root / ".claude" / "settings.json"
+def _settings_path(project_dir: Path) -> Path:
+    return project_dir / ".claude" / "settings.json"
 
 
 def _load(path: Path) -> dict:
@@ -95,12 +95,7 @@ def main() -> int:
         print("usage: python3 scripts/dag-statusline.py <on|off|status>")
         return 0
 
-    repo_root = find_repo_root(Path.cwd())
-    if repo_root is None:
-        print("statusline: not inside a git repo — nothing to toggle.")
-        return 0
-
-    path = _settings_path(repo_root)
+    path = _settings_path(Path.cwd())
     {"status": cmd_status, "off": cmd_off, "on": cmd_on}[sys.argv[1]](path)
     return 0
 
