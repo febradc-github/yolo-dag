@@ -25,6 +25,7 @@ sys.path.insert(0, str(PLUGIN_ROOT))
 
 try:
     from meter import config as config_mod
+    from meter import governor
     from meter import ledger
     from meter import store
 except Exception:
@@ -112,12 +113,15 @@ def _handle_sessionend(payload: dict) -> None:
                     run_json = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     pass
-                ledger.write_run_artifacts(conn, run_dir, run_id, run_json)
+                ledger.write_run_artifacts(conn, run_dir, run_id, run_json, plugin_data_dir)
 
                 rows = store.get_ledger_rows(conn, run_id)
                 mode = (run_json or {}).get("mode", "unknown")
                 ledger.update_baseline(plugin_data_dir, config_mod.repo_fingerprint(repo_root),
                                         mode, rows)
+                # M6 Governor 6a: recompute weights.json now that baseline.json just
+                # changed, so the orchestrator's next run picks up fresher coefficients.
+                governor.recalibrate_weights(plugin_data_dir)
             except Exception as exc:
                 _log(plugin_data_dir, f"sessionend accounting failed: {exc!r}")
 

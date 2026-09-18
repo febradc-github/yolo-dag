@@ -57,6 +57,22 @@ def _health_check(port: int, token: str, timeout: float = 1.0) -> bool:
         return False
 
 
+def _refresh_read_conflict_marker(plugin_data_dir: Path, repo_root: Path) -> None:
+    """M3a mitigation (meter-handoff.md Section 6.2's "known hazard"): written
+    once per SessionStart so meter/router.py's `_decide_clamp_read` can check
+    a plain file instead of re-scanning settings.json on every Read. See
+    meter/config.py's `detect_read_hook_conflict` for what this looks for."""
+    marker_path = config_mod.read_conflict_marker_path(plugin_data_dir, repo_root)
+    conflict = config_mod.detect_read_hook_conflict(repo_root)
+    try:
+        if conflict:
+            marker_path.write_text(conflict, encoding="utf-8")
+        elif marker_path.exists():
+            marker_path.unlink()
+    except OSError:
+        pass
+
+
 def _bump_refcount(plugin_data_dir: Path, delta: int) -> None:
     path = plugin_data_dir / "refcount"
     try:
@@ -85,6 +101,9 @@ def main() -> int:
         _log(plugin_data_dir, "disabled via config")
         _emit(None)
         return 0
+
+    if repo_root is not None:
+        _refresh_read_conflict_marker(plugin_data_dir, repo_root)
 
     port = int(os.environ.get("DAG_METER_PORT", cfg.get("port", config_mod.DEFAULT_PORT)))
     token_path = plugin_data_dir / "token"

@@ -309,23 +309,225 @@ in parallel (anything with no unresolved edges pointing into it).
 
 `meter` is a local, zero-network subsystem, shipped inside this plugin and **on by default**,
 that measures real per-node token spend via Claude Code's hooks — see
-[`meter-handoff.md`](meter-handoff.md) for the full design. **Only its first milestone is
-implemented: the Ledger.** It measures and changes nothing else about how a run behaves — no tool
-input or output is ever rewritten by it. Later milestones (context packs, output compression, a
-patch cache, budget recalibration) don't ship until the Ledger has produced real numbers against
-real runs.
+[`meter-handoff.md`](meter-handoff.md) for the full v1 design and
+[`meter-v2-handoff.md`](meter-v2-handoff.md) for the v2 token-reduction modules that build on it.
+**All of v1's milestones except Codemod (M7, which the spec itself says "ships last or not at
+all") are implemented: the Ledger (M0), Receipts (M1), Dossier (M2), Clamp (M3, both halves), Echo
+(M4, measure-only), Vault (M5, shadow mode only), and Governor (M6, with one deliberate deviation —
+see below).** Ledger measures and changes nothing about how a run behaves — no tool input or
+output is ever rewritten by it. Receipts is the first milestone with a
+real (if narrow) behavioural effect: `task-worker` and `task-reviewer` now emit a trailing
+machine-readable `dag-receipt` fenced block, and a missing/invalid one gets exactly one repair turn
+(`meter.modules.receipts.repair_turns`, default 1) before the daemon lets it through
+unconditionally — a malformed receipt can never deadlock a node. Dossier precomputes a per-task
+context pack — owned files' indexed symbols (Python via `ast`, other languages via a regex table —
+see `meter/index/symbols.py`), 1-hop import neighbours, relevant contract text, sibling task
+receipts, recent git history, and a bounded text search — with zero model calls, and delivers it
+via `additionalContext` at `SubagentStart`; a `Glob`/`Grep` before the dossier has been read gets
+denied once (up to `meter.modules.dossier.max_denials`, default 2) with a pointer to it, never more
+than that, so an agent that genuinely needs to explore always can. Clamp has two halves: **3a**
+rewrites an unbounded `Read` of a large file the index has an opinion about (a 1-hop import
+neighbour of the task's owned files) down to just the relevant spans plus a margin — never an owned
+file, never a file the index has no opinion on, never a file the agent already asked to read
+narrowly — and turns a *repeat* unbounded read of a span it's already delivered into a denial
+("you already have this") rather than sending the content twice; **3b** compresses oversized `Bash`
+(test runs, `git diff`, build/install logs) and `Grep` output before it reaches an agent's context,
+per-tool, always preserving every error/warning line and the full original on disk
+(`.dag/runs/<run-id>/meter/tool-output/`). Both halves decline outright rather than guess when
+they aren't confident — 3a's rewriting also disables itself for an entire repo's sessions if
+`dag-doctor` or `SessionStart` detects a conflicting `PreToolUse`-on-`Read` hook in user/project
+settings, the documented hazard where Claude Code lets the last of several matching hooks silently
+win (`meter-handoff.md` Section 6.2). Echo measures (never rewrites) how much of the Task-prompt
+text handed to each spawned agent is byte-identical to text another sibling agent already received
+in the same run — `/dag-cost` reports the resulting "echoed tokens" figure, the measured size of
+the duplication this plugin's later milestones exist to eliminate; it currently only watches the
+Task-prompt channel (see `meter/echo.py` for why). Vault computes a semantic key for every
+successfully completed task (its title, acceptance criteria, contract text, and the content/spans
+it was given, normalised so IDs, dates, and run ids never cause a false-positive collision — see
+`meter/vault.py`'s exhaustively unit-tested `norm()`) and, in **shadow mode** (the default and
+currently the only implemented mode), records what a cached patch for that key *would* have looked
+like and diffs it against what the task's own worker actually produced — `/dag-vault stats` reports
+the agreement rate. **The worker always runs regardless; shadow mode never applies a patch or skips
+a spawn.** Real replay (`rework_only`/`full` modes, which would actually substitute a cached patch
+for a worker) isn't built yet — the spec's own promotion path requires shadow mode to run clean for
+50 real runs before real replay is even allowed to ship, so building it now would jump the queue on
+the evidence it's gated on. Governor recalibrates the orchestrator's per-spawn budget weights from
+real measured cost per agent type (`skills/orchestrator/SKILL.md` reads
+`${CLAUDE_PLUGIN_DATA}/meter/weights.json` if present, falling back to the existing hardcoded tier
+weights otherwise — the ceiling and degradation ladder are unchanged either way), prints a
+cost-by-agent-type routing report and a prompt-cache-TTL recommendation in `/dag-cost`, and contains
+runaway nodes — but **not** on the spec's own token-based signal. Live per-tool-call token
+tracking isn't possible on this plugin's transcript-only accounting (tokens are only known once, in
+full, at `SubagentStop` — by which point there's nothing left to contain), so containment instead
+uses **tool-call count** as a live proxy: cheap to track, correlated with real spend in practice,
+but a genuinely different metric than the spec names, not a hidden implementation detail — see
+`meter/governor.py`'s module docstring for the full reasoning. Warn at 2x and deny further tool
+calls at 3x a measured (or default) call-count prediction, same thresholds the spec asks for, just
+applied to a different quantity.
+
+**v2** ([`meter-v2-handoff.md`](meter-v2-handoff.md)) adds further token-reduction modules under
+the same `meter.modules.*` namespace, shipped by risk class (lossless first). **R1 (lossless) is
+complete: Intern, Throttle, and Oracle.** **Intern** (M9) gives every file path mentioned in a
+dossier a shorter form, stated once, so the dozens of later references cost far less — default
+mode is `basename` (strip the directory prefix every file in the node shares, "guaranteed safe...
+no comprehension risk at all" per the spec), with a full `codebook` mode (short `f1`/`f2`/... codes
+for files, plus symbol/contract/AC codes) implemented and available but deliberately not the
+default: the spec's own two comprehension-risk mitigations require an A/B harness this repo doesn't
+have to confirm "no measurable change in rework count or review findings" before it's safe to turn
+on for real work. Every codebook round-trips exactly (see `meter/intern.py`'s exit-criterion test)
+and is stored alongside its dossier so a human can decode it later. Scoped to the dossier's own
+file-path mentions only — task prompts, receipts, review findings, and contract text authored by
+agents or the orchestrator are not interned, since that needs either new daemon-side rewriting
+hooks or a shared codebook protocol taught to every agent template, both bigger and riskier than
+anything else in this module. **Throttle**
+(M13, lossless) denies a `Write` to an existing, git-tracked file with a reason naming `Edit` —
+output bills at roughly 5x input, so a full-file rewrite is the most expensive way to make a small
+change — with four exceptions (new file, generated-shaped file, a rewrite large enough that
+denying it wouldn't help, or the agent's already been denied twice for this exact path) so a
+genuinely needed rewrite always gets through; it also reports (never enforces) a prose-to-artifact
+output ratio per agent type in `/dag-cost`. Its third piece, 13c (routing mechanical nodes to a
+lower reasoning effort), is deliberately not implemented — it needs a hook capability
+(`meter-v2-handoff.md` VERIFY item) nothing here can confirm exists yet, and the spec's own
+instruction for exactly that situation is to close it and say so, which `meter/throttle.py` does.
+**Oracle** (M15, lossless) caches a `Grep` answer, keyed by a normalised hash of the question
+(lowercased, punctuation/pronouns/stopwords stripped, remaining words sorted — so "where is the
+session token validated" and "session token validation location" hash identically) — a repeated
+or semantically-equivalent search within the same run gets denied with the prior answer instead of
+re-running. Any `Write`/`Edit` to a file an answer's content came from invalidates that answer
+immediately; a content hash of the same files is also re-checked on every lookup as a backstop.
+Scoped to `Grep` only — `Glob` has no existing output hook to record an answer from and is a
+lower-value target anyway (cheap filename matches, not the expensive full-text search this
+targets), and repeated-`Read` caching is already covered by Clamp 3a's own read-span tracking, so
+building a second version of the same idea here would just be duplicated bookkeeping. Cross-run
+reuse is off by default — the cache never outlives the run it was built in.
+
+**R2 (verified) is in progress: Sieve is done, Distill is next.** **Sieve** (M11) runs a
+deterministic checker registry against a task's diff before its `task-reviewer` even starts, then
+injects a declaration into the reviewer's prompt naming which classes are already checked and
+passed — so the reviewer's attention goes to what tooling can't decide, and mechanical findings
+never consume a review round. Two checkers are fully real (`ownership`: does the commit touch
+anything outside the task's `owns`; `secrets`: regex-scanned credential shapes in the diff);
+`types`/`lint` run best-effort against whatever this repo's own config says applies (`tsconfig.json`
+→ `tsc`, an ESLint/Ruff config → that linter) and report `not run` rather than guess otherwise;
+`tests`/`ast` always report `not run` — a hook can't safely commit to an arbitrary test suite's
+unbounded runtime, and no per-repo AST rule format exists yet. **The one invariant that makes this
+"verified" rather than "statistical":** the declaration only ever states a class as covered when it
+both ran and passed — never omitted, never assumed. This module also carries this plugin's single
+highest-blast-radius rewrite: it's the only place `updatedInput` rewrites an `Agent` spawn's prompt
+rather than a `Read`/`Grep`/`Write`'s input, and a bug here would corrupt every review in the
+pipeline, not just narrow one file read — so `meter/router.py`'s `_maybe_run_sieve` is deliberately
+conservative, returning untouched on any uncertainty (missing `WORKTREE:`/`COMMIT:` lines, an
+unresolvable task, a checker exception) rather than ever guessing. It required one small
+`skills/orchestrator/SKILL.md` change: a `task-reviewer` spawn now restates its worktree/commit as
+literal lines (the same "inert if `meter` isn't installed" pattern as the existing `DAG-NODE:`
+line), since there was previously no fixed format to parse them from.
+
+**Distill** (M12) is also implemented — with a real architectural split worth calling out. Its
+mechanism needs an actual model call (a Haiku-tier pass to compile a spec into a dense brief, plus
+more model calls for a fidelity gate: generate closed questions from the full spec, answer them
+from the brief alone, reject on any miss), and this daemon is a credential-less local process with
+no way to invoke a model. So the daemon owns only what it safely can — a content-hash-keyed brief
+cache (`scripts/dag-distill.py check`/`store`/`record-fetch`/`stats`) that survives across runs and
+repos with an identical spec — and a new agent, `spec-distiller`, plus a Phase 4 addition to
+`skills/orchestrator/SKILL.md`, do the actual compile-and-verify work: one spawn compiles the brief
+and a set of verification questions from the full spec, a second **fresh** spawn (blind to the full
+spec and to the first spawn's reasoning) answers those questions from the brief alone, and the
+Orchestrator itself grades the answers — no extra spawn needed for that. Worth being honest about
+scope: checking this repo's own `skills/orchestrator/SKILL.md`, its existing design doesn't
+actually pass the merged spec into "every agent" the way the spec assumes — Phase 5's
+`task-worker`/`task-reviewer` only ever receive their own task's slice, never the whole spec. The
+one spawn that does receive the full spec, once per run, is `task-specialist` in Phase 4 — so
+that's where Distill is wired in, and its practical payoff here is narrower than the spec's own
+framing (cross-run/cross-repo reuse of an identical spec, not "every agent in the run" — there's
+only one full-spec consumer per run in this codebase).
+
+**R3's measurement half, M14 Attribution, is also done** (M14 ships and measures alone before M10
+Pull is even considered, per the spec's own release plan — see below). It records, for each node,
+which dossier sections it was exposed to beyond its own owned files (a 1-hop import neighbour, a
+contract's text, a sibling task's receipt) and whether it ever actually touched that content
+afterward — a `Read`/`Grep`/`Edit` targeting it, or a literal mention in its final report, both
+show up as the same signal: the exposed file path or id appearing anywhere in its transcript.
+Never enforced, never prunes anything — `meter.modules.attribution.prune` stays `False`, same
+posture as Vault's shadow mode: measure through a full release before anything is allowed to act
+on the measurement. `/dag-cost` reports the resulting reference rate per `(agent_type, unit_type)`,
+persisted across every run so the numbers actually accumulate into something meaningful over time.
+
+**M10 Pull is implemented and tested, but ships DISABLED by default** (`meter.modules.pull.enabled:
+false`, deliberately overriding the spec's own sample config, which shows it on). The spec's
+release plan says Pull "ships only if M14's measured reference rate justifies it" — that
+measurement needs a full release of real run data, which doesn't exist yet. When enabled, a
+dossier's sections are each written to their own file under
+`.dag/runs/<run-id>/meter/dossiers/<node>/` instead of being pushed inline, and a short (~200 tok)
+manifest — one line per section, its id and approximate size — is injected via `additionalContext`
+instead; the agent pulls what it actually needs with an ordinary `Read`, tracked per section. The
+build (at `PreToolUse` on the spawning `Agent` call) and the delivery (a separate, later
+`SubagentStart` request that shares no Python state with the build — only what landed on disk) are
+two different hook invocations, which is exactly the kind of handoff a unit test on either half
+alone wouldn't catch if it broke; a dedicated integration test exercises the full
+build-then-deliver-then-track sequence. Per-agent-type promotion (push a section pulled >80% of
+the time) and reversion (force full push where the round-trip overhead outweighs the saving) are
+implemented as a `recommend()` function ready to run once real pull-rate data exists, but nothing
+currently calls it automatically — turning any of this on before that evidence exists would be
+jumping the queue on the spec's own gate.
+
+**R4's M8 Quorum completes every module in the v2 handoff doc** (the only one left unbuilt is v1's
+M7 Codemod, which that spec itself says ships last or not at all). Quorum is the doc's own largest
+lever and its only quality-trading module — "three critics per round is a 3x multiplier on the
+most expensive phase in the pipeline," and in this codebase that's Phase 2's 3-`spec-reviewer`
+loop, not Phase 5's already-single `task-reviewer`. **Ships disabled by default**
+(`meter.modules.quorum.enabled: false`), same reasoning as Pull: the spec's own gate needs 50+
+full-quorum samples per specialist domain, measuring whether critics 2 and 3 ever produce a
+finding critic 1 missed that the parent accepted as valid, before any domain may narrow below 3 —
+and that measurement needs real runs this repo hasn't had. The contention predicate (the
+deterministic escalate/don't-escalate decision — no model call ever makes it, per the spec's own
+hard requirement) and the recall-guard sampling are fully implemented and tested, with one
+disclosed adaptation: this repo's `spec-reviewer` reports a bare finding *count*
+(`REVIEW: FINDINGS <n>`), not per-finding severities, so "critic 1 found anything at all"
+substitutes for the spec's severity-threshold check — a stricter, not silently different, signal.
+The `skills/orchestrator/SKILL.md` addition is one sentence, inert today: with no domain ever
+reaching 50 samples, Phase 2 always spawns all 3 reviewers, byte-for-byte the same as before this
+module existed.
 
 It starts itself on `SessionStart` (a loopback-only daemon on `127.0.0.1:47615` by default) and
 reports via `/dag-cost <run-id>`. Run `python3 scripts/dag-doctor.py` any time to see its
 capability matrix, including which of its own design assumptions are still unverified against
-your Claude Code install.
+your Claude Code install — the SubagentStop block/repair mechanism Receipts relies on is one of
+them; see the VERIFY item it prints.
 
 Its HTTP hooks authenticate with a token, but only advisorily: Claude Code has no documented way
 for a `SessionStart` hook to hand a freshly generated secret to the hooks that fire afterward, so
-an unauthenticated local request is still processed rather than rejected — safe here because this
-milestone only ever *observes* (no hook response from it ever rewrites a tool's input or output).
-`dag-doctor` reports the authenticated/unauthenticated split so you can see whether your
-environment happens to wire the token through.
+an unauthenticated local request is still processed rather than rejected. This is safe for Ledger
+because it only ever *observes*; safe for Receipts because an unauthenticated repair-turn request
+is still just asking the same subagent to re-emit its own already-required receipt; safe for Clamp
+3b because every compressor only ever shortens a result the tool already legitimately produced —
+it can't inject content, and the full original is always kept on disk regardless of which path
+requested the compression; safe for Dossier's `Glob`/`Grep` enforcement because its worst case is
+one denied call with a pointer to a context pack the agent was always going to receive anyway,
+capped at `max_denials` regardless of how many requests arrive; safe for Clamp 3a's read
+rewriting because `updatedInput` can only ever *narrow* a `Read` to a sub-range of the same file at
+the same path — it cannot redirect the read elsewhere or fabricate content, so the worst case of an
+unauthenticated request is the same file read more narrowly than intended, never a different file
+or invented text; safe for Governor's containment because it only ever denies a tool call this
+same subagent was already about to make (never rewrites input, never substitutes a different tool),
+capped by the same `runaway_multiplier`-derived threshold every legitimate request would also hit;
+safe for Throttle because a denied `Write` costs the agent one extra `Edit` call at most — the
+file, the path, and the agent's own intended content are all unchanged, and the worst case of an
+unauthenticated request is a slightly less efficient tool choice, never a different outcome; safe
+for Oracle because a served cache hit is always an answer this exact run already produced
+for an equivalent search, re-verified against the current file content on every lookup — the
+worst case of an unauthenticated request is a legitimate prior answer returned again, never a
+fabricated one; safe for Sieve because the rewrite only ever *appends* a declaration built
+from checks it ran itself against the real worktree/commit named in the prompt already — it
+can't inject arbitrary content or redirect the spawn, so the worst case of an unauthenticated
+request is a factual, checker-derived note the reviewer would have been correct to receive
+anyway; safe for Attribution because it only ever records whether a token already present in the
+dossier it built appeared in a transcript that already exists — pure bookkeeping, nothing it
+records can change what any tool does; and safe for Pull (disabled by default regardless) because
+its manifest names only files this same dossier build already wrote to disk for this exact node.
+(Quorum has no hook surface at all yet — its measurement table and the orchestrator's read of it
+are the only moving parts, so this auth question doesn't apply to it.) `dag-doctor` reports the
+authenticated/unauthenticated split so you can see whether your environment happens to wire the
+token through.
 
 **To turn it off** (or back on), run `/dag-meter off` / `/dag-meter on` — `/dag-meter status`
 reports whether it's currently running. It persists the choice to `.dag/meter.json` for every
@@ -347,9 +549,10 @@ yolo-dag/
 │   ├── dag-cancel.md            # stop an in-flight run, resumably
 │   ├── dag-clean.md             # prune worktrees, run state, and (with confirmation) branches
 │   ├── dag-cost.md              # measured token spend for one run, from meter's Ledger
-│   └── dag-meter.md             # turn meter on/off, or check whether it's running
-├── hooks/hooks.json              # meter's Claude Code hook registration (M0 subset)
-├── meter/                        # meter's package — see meter-handoff.md; M0 (Ledger) only
+│   ├── dag-meter.md             # turn meter on/off, or check whether it's running
+│   └── dag-vault.md             # Vault (M5) stats and purge, shadow-mode agreement rate
+├── hooks/hooks.json              # meter's Claude Code hook registration (v1 M0-M6 + v2 R1 + M11)
+├── meter/                        # meter's package — v1: M0 (Ledger) + M1 (Receipts) + M2 (Dossier) + M3 (Clamp, both halves) + M4 (Echo, measure-only) + M5 (Vault, shadow mode only) + M6 (Governor, 6b via a call-count proxy); v2 (meter-v2-handoff.md, ALL of R1-R4 implemented): M9 (Intern) + M13 (Throttle) + M15 (Oracle) + M11 (Sieve) + M12 (Distill, cache only) + M14 (Attribution, measure-only) + M10 (Pull, disabled by default) + M8 (Quorum, disabled by default)
 ├── agents/
 │   ├── design-specialist.md
 │   ├── architecture-specialist.md
@@ -362,6 +565,7 @@ yolo-dag/
 │   ├── spec-reviewer.md         # generic role, spawned 3x per review round, one named checklist each
 │   ├── spec-consolidator.md     # generic role, spawned once per review round
 │   ├── spec-reconciler.md       # spawned once in Phase 3; the only agent that sees every deliverable at once
+│   ├── spec-distiller.md        # meter's M12 Distill — compiles/verifies a dense brief before Phase 4
 │   ├── task-specialist.md       # decomposes the merged spec into a task DAG
 │   ├── task-worker.md           # generic role, worktree-isolated, ends with a machine trailer
 │   ├── task-reviewer.md         # generic role, verifies inside the worker's worktree
@@ -371,6 +575,8 @@ yolo-dag/
     ├── validate.py               # structural validator, run in CI
     ├── dag-doctor.py             # meter's capability matrix and VERIFY probes
     ├── dag-meter.py              # meter's on/off/status CLI, behind /dag-meter
+    ├── dag-vault.py              # meter's Vault stats/purge CLI, behind /dag-vault
+    ├── dag-distill.py            # meter's M12 Distill brief cache CLI, called from Phase 4 (no slash command — orchestrator-internal)
     ├── meter-boot.py             # meter's SessionStart hook (starts/refcounts the daemon)
     └── meter-hook.py             # meter's SessionEnd hook (main-thread accounting, refcounting)
 ```

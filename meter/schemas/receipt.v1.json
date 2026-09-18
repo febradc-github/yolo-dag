@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "meter/schemas/receipt.v1.json",
+  "title": "dag-receipt (M1)",
+  "description": "The fenced ```dag-receipt block an agent template appends after its existing prose trailer (meter-handoff.md Section 4/M1). Additive to, never a replacement for, the WORKTREE/BRANCH/COMMIT/BLOCKER or VERDICT lines already in the template. Parsed from the last fenced `dag-receipt` block in the agent's final transcript message.",
+  "type": "object",
+  "required": ["v", "node", "status"],
+  "properties": {
+    "v": { "const": 1 },
+    "node": { "type": "string", "description": "DAG node id, e.g. T-003" },
+    "status": { "type": "string", "enum": ["done", "blocked", "partial"] },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "action"],
+        "properties": {
+          "path": { "type": "string" },
+          "spans": {
+            "type": "array",
+            "items": {
+              "type": "array", "items": { "type": "integer" },
+              "minItems": 2, "maxItems": 2
+            }
+          },
+          "action": { "type": "string", "enum": ["create", "modify", "delete"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "symbols_touched": { "type": "array", "items": { "type": "string" } },
+    "ac": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "met"],
+        "properties": {
+          "id": { "type": "string" },
+          "met": { "type": "boolean" },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "cmd": { "type": "string" },
+        "exit": { "type": "integer" },
+        "digest": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "contracts": {
+      "type": "object",
+      "properties": {
+        "owned": { "type": "array", "items": { "type": "string" } },
+        "consumed": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "worktree": { "type": "string" },
+    "commit": { "type": "string" },
+    "source": {
+      "type": "string", "enum": ["live", "vault"],
+      "description": "vault is reserved for M5; M1 only ever writes live"
+    }
+  },
+  "additionalProperties": false
+}

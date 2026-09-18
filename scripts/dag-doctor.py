@@ -219,6 +219,18 @@ def check_claude_code() -> None:
                 line(INFO, f"{path}: {key}", str(data[key]))
 
 
+def check_read_hook_conflict(repo_root: Path | None) -> None:
+    section("Clamp 3a hazard check (meter-handoff.md Section 6.2)")
+    conflict = config_mod.detect_read_hook_conflict(repo_root)
+    if conflict:
+        line(WARN, "a user/project PreToolUse hook also matches Read", conflict)
+        line(INFO, "M3a's bounded reads are disabled for this repo's sessions",
+             "scripts/meter-boot.py wrote a marker at SessionStart; remove the conflicting "
+             "hook (or narrow its matcher to exclude Read) and start a new session to clear it")
+    else:
+        line(PASS, "no conflicting PreToolUse-on-Read hook found in user/project settings")
+
+
 def check_verify_items() -> None:
     section("VERIFY items (meter-handoff.md Section 6.1 — cannot be answered without a live "
             "session; see probe-capture below)")
@@ -235,6 +247,67 @@ def check_verify_items() -> None:
         "Whether `additionalContext` from SubagentStart lands before the subagent's first prompt",
         "Whether the DAG_METER_TOKEN header/allowedEnvVars mechanism authenticates any request "
         "at all (see meter/daemon.py's module docstring — this is suspected broken as specified)",
+        "Whether a top-level {\"decision\": \"block\", \"reason\": ...} response to the "
+        "SubagentStop HTTP hook actually forces a repair turn (meter/receipts.py, M1) — the "
+        "Stop hook is documented to support this shape; SubagentStop's exact parity with Stop "
+        "over an HTTP (not command) transport is unconfirmed. Fails open: an unconfirmed "
+        "mechanism here means a malformed receipt is recorded but not repaired, never a hang",
+        "The exact field name and shape of a PostToolUse payload's tool output (tried: "
+        "tool_response/toolResponse/tool_output, then output/stdout/content/text keys inside "
+        "it) — meter/router.py's _extract_tool_output_text, used by Clamp 3b (M3)",
+        "Whether PostToolUse's session_id (or any other payload field) identifies which "
+        "run/node a subagent's own tool call belongs to — Clamp 3b currently falls back to "
+        "\"the most recently active run in this repo\" for where it files a spooled full-output "
+        "copy, which can misattribute the *filing location* (never the compression itself) "
+        "when two runs are active in the same repo at once",
+        "Whether a PreToolUse/PostToolUse payload for a subagent's OWN tool call (Read/Grep/"
+        "Glob/Bash fired from inside a spawned task-worker, not the orchestrator's own Agent "
+        "call) carries that subagent's agent_id at all — M2 Dossier's enforcement half "
+        "(meter/router.py's handle_tool_pre_dossier) can only deny a Glob/Grep or notice a "
+        "dossier Read when agent_id is present; absent it, enforcement silently never fires "
+        "(fail-open: the dossier is still delivered via additionalContext, it just isn't "
+        "enforced)",
+        "Whether the Agent tool's PreToolUse tool_input payload names the target agent type "
+        "as `subagent_type` (this repo's own Agent tool schema uses that key) or something "
+        "else — meter/router.py's _maybe_build_dossier gates dossier building on "
+        "meter.modules.dossier.apply_to using this field; if the key differs, dossiers are "
+        "built for every subagent type rather than just task-worker/task-reviewer, which is "
+        "extra (wasted) work, never a wrong dossier",
+        "Whether the matcher-less PreToolUse entry in hooks.json actually fires on every tool "
+        "call (Governor 6b, meter/router.py's handle_tool_pre_governor) — this is a materially "
+        "larger surface than any other hook meter registers, and doubly depends on agent_id "
+        "being present on a subagent's own tool calls (see the item above about Dossier "
+        "enforcement, which has the identical dependency)",
+        "Whether a top-level PreToolUse `allow` decision's `permissionDecisionReason` is ever "
+        "actually surfaced to the model — Governor's 2x overrun warning "
+        "(meter/router.py's handle_tool_pre_governor) delivers its note this way because the "
+        "spec's own suggested mechanism (PostToolUse additionalContext) isn't a documented "
+        "PostToolUse capability; if this doesn't surface, the 2x warning is silently inert "
+        "while the 3x deny (a well-established `permissionDecision: deny` shape) still works",
+        "Whether the installed Claude Code exposes per-node reasoning effort to a hook, via an "
+        "`effort` field on hook payloads or a $CLAUDE_EFFORT environment variable — v2 M13c "
+        "(effort routing) is deliberately NOT implemented pending this; meter-v2-handoff.md's "
+        "own instruction for exactly this situation is \"if it does not, close 13c and note "
+        "it,\" which is what meter/throttle.py's module docstring does",
+        "Whether a PostToolUse payload for Write/Edit carries agent_id (the same open question "
+        "as elsewhere in this list) — v2 M15 Oracle's invalidate-on-write path "
+        "(meter/router.py's handle_tool_post) falls back to \"the most recently active run in "
+        "this repo\" when absent, same as Clamp 3b; a wrong run_id here means an invalidation "
+        "or a cached answer lands under the wrong run's scope, which is a silent miss, never a "
+        "stale answer served (the tree_state_hash re-check at lookup, meter/oracle.py, is the "
+        "correctness backstop regardless of which run_id an entry ends up under)",
+        "Whether the orchestrator actually restates a task-reviewer spawn's WORKTREE/COMMIT as "
+        "literal `WORKTREE: <path>` / `COMMIT: <sha>` lines (skills/orchestrator/SKILL.md's own "
+        "instruction, added alongside v2 M11 Sieve) — meter/router.py's _maybe_run_sieve regexes "
+        "for exactly this shape and returns None (never a guess) if it can't find both lines, "
+        "so the worst case of this being wrong is Sieve simply never firing, not a corrupted "
+        "reviewer prompt",
+        "v2 M10 Pull is implemented but DISABLED BY DEFAULT (meter.modules.pull.enabled = "
+        "false) pending real measured evidence from M14 Attribution — see meter/pull.py's "
+        "module docstring. If ever enabled for testing: it shares the same agent_id-on-a-"
+        "subagent's-own-tool-calls dependency as Clamp 3a/Dossier enforcement above, since "
+        "pull-section tracking (meter/router.py's handle_tool_pre_dossier) keys off the same "
+        "dossier_state row",
     ]
     for item in items:
         line(UNVERIFIED, item)
@@ -257,6 +330,8 @@ def _summarize_probe_capture(capture_path: Path) -> None:
     tool_names: set[str] = set()
     subagent_start_keys: set[str] = set()
     subagent_stop_keys: set[str] = set()
+    tool_post_keys: set[str] = set()
+    tool_pre_dossier_keys: set[str] = set()
     count = 0
     try:
         with capture_path.open("r", encoding="utf-8") as fh:
@@ -279,6 +354,10 @@ def _summarize_probe_capture(capture_path: Path) -> None:
                     subagent_start_keys.update(payload.keys())
                 elif endpoint == "subagent_stop":
                     subagent_stop_keys.update(payload.keys())
+                elif endpoint == "tool_post":
+                    tool_post_keys.update(payload.keys())
+                elif endpoint == "tool_pre_dossier":
+                    tool_pre_dossier_keys.update(payload.keys())
     except OSError as exc:
         line(WARN, "could not read probe-capture.jsonl", str(exc))
         return
@@ -290,18 +369,24 @@ def _summarize_probe_capture(capture_path: Path) -> None:
         line(PASS, "SubagentStart payload keys observed", ", ".join(sorted(subagent_start_keys)))
     if subagent_stop_keys:
         line(PASS, "SubagentStop payload keys observed", ", ".join(sorted(subagent_stop_keys)))
+    if tool_post_keys:
+        line(PASS, "PostToolUse payload keys observed", ", ".join(sorted(tool_post_keys)))
+    if tool_pre_dossier_keys:
+        line(PASS, "PreToolUse (Read/Grep/Glob) payload keys observed",
+             ", ".join(sorted(tool_pre_dossier_keys)))
 
 
 def main() -> int:
     repo_root = config_mod.find_repo_root(Path.cwd())
     cfg = config_mod.load_config(repo_root)
 
-    print("dag-doctor — meter capability matrix (M0)")
+    print("dag-doctor — meter capability matrix")
     check_runtime()
     check_environment()
     check_network(cfg)
     check_external_tools()
     check_claude_code()
+    check_read_hook_conflict(repo_root)
     check_verify_items()
 
     print()

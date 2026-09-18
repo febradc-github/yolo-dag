@@ -125,3 +125,31 @@ Get the values from `git rev-parse --show-toplevel`, `git branch --show-current`
   these — a run
   where most failures are `spec-defect` tells the user the spec was the problem, which is the
   most valuable signal the execution layer produces.
+
+**After the trailer, also end with a machine-readable receipt** — a fenced block, last thing in
+your final message, matching `meter/schemas/receipt.v1.json`:
+
+````
+```dag-receipt
+{ "v": 1, "node": "T-003", "status": "done",
+  "files": [{"path": "src/a.ts", "spans": [[10,48]], "action": "modify"}],
+  "symbols_touched": ["AuthService.refresh"],
+  "ac": [{"id": "AC-02", "met": true, "evidence": "tests/auth.spec.ts:44"}],
+  "verification": {"cmd": "npm test -- auth", "exit": 0},
+  "contracts": {"owned": ["C-01"], "consumed": []},
+  "risks": ["refresh path untested under clock skew"],
+  "worktree": "/abs/path/to/worktree", "commit": "0123abcd" }
+```
+````
+
+Replace every field with your task's real values — `node` is your actual task id, `status` is
+`done`, `blocked`, or `partial` (matching your `BLOCKER:` line above: `blocked` only when
+`BLOCKER:` is not `none`), and `worktree`/`commit` are the same values as `WORKTREE:`/`COMMIT:`
+above. Omit `files`/`symbols_touched`/`ac`/`verification`/`contracts`/`risks` only when they
+genuinely don't apply — don't fabricate values to fill them in.
+````
+
+This is additive to the trailer above, never a replacement for it — both must be present. If the
+receipt block is missing or doesn't validate, you'll be asked to re-emit a corrected one in a
+follow-up turn; get every field right the first time where you can (`spans` are 1-indexed
+`[start, end]` line pairs, `status` is `blocked` only when `BLOCKER:` above is not `none`).

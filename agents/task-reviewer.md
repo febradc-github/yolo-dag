@@ -90,3 +90,18 @@ You may **also** call `ReportFindings` so the findings render in the host UI —
 anchor to real files and lines, so the tool fits. But `ReportFindings` output is not what the
 Orchestrator reads; the verdict line in your final message is. Never rely on the tool call alone
 to communicate your verdict.
+
+**After the verdict line, also end with a machine-readable receipt** — a fenced block, last thing
+in your final message, matching `meter/schemas/receipt.v1.json`:
+
+````
+```dag-receipt
+{ "v": 1, "node": "T-003", "status": "done",
+  "ac": [{"id": "AC-02", "met": true}],
+  "risks": ["state any >=80-confidence issue you did not flag as a full finding"] }
+```
+````
+
+Replace `node` with the actual task id you reviewed. `status` is `done` on `VERDICT: PASS` and
+`blocked` on `VERDICT: FLAGGED`. This is additive to the verdict line above, never a replacement
+for it.

@@ -215,6 +215,16 @@ the ceiling exists to prevent. Append an entry to `run.json`'s `spawns` array as
 spawns goes out (`{"agent": ..., "model": ..., "phase": ...}`), and compute spend by re-reading it.
 
 Unit weights: session-model (`inherit`) spawn = **1.0**, `sonnet` = **0.5**, `haiku` = **0.1**.
+These are per-*tier* guesses, and `meter` (if installed and enabled — see [Meter](../../README.md#meter-on-by-default-measurement-only))
+recalibrates them into per-*agent-type* measured coefficients from real runs. Before weighting a
+spawn, check whether `${CLAUDE_PLUGIN_DATA}/meter/weights.json` exists (it won't on a fresh
+install, or if meter is off — that's normal, not an error). If it does, look up
+`weights[<mode>][<agent_type>]`; use that number in place of the tier weight for that spawn. If
+the file is absent, or has no entry for this exact `(mode, agent_type)` pair, fall back to the
+tier weight above — never block on a missing or malformed weights.json, and never invent a number
+for an agent type it doesn't cover. The ceiling, the degradation ladder, and everything below in
+this section are otherwise completely unchanged — recalibration only makes the existing budget
+math more accurate, it never replaces the policy.
 
 When a run crosses the mode's soft budget, **degrade rather than stop or silently overspend**,
 in this order: drop remaining review rounds to 1, then narrow any not-yet-started specialists to
@@ -279,7 +289,13 @@ wait for all of them — they can be at different rounds simultaneously):
    specialist's current deliverable, the original request, and one of the three named angles
    defined in the `spec-reviewer` agent file: **completeness/gaps**, **internal consistency**
    (spawn this one with `model: "sonnet"` — the one model override this pipeline makes, for
-   decorrelation), and **feasibility/risk**.
+   decorrelation), and **feasibility/risk**. **Meter's adaptive quorum (v2 M8, inert unless
+   `meter.modules.quorum.enabled` is explicitly set true, which it is not by default) may narrow
+   this to 1 reviewer for a specialist domain the daemon has measured, over 50+ full runs, adds
+   nothing beyond what one reviewer already catches — see `meter/quorum.py`. Absent that
+   measurement (the default state, and the only state possible before this plugin has real run
+   history), always spawn all 3 exactly as written here; this is not something to reason about
+   per run.**
 2. Each reviewer ends its final message with `REVIEW: CLEAN` or `REVIEW: FINDINGS <n>`. **Read
    that line, not a tool call** — reviewers do not call `ReportFindings` (they review prose, which
    has no file or line to anchor to). If all 3 report `REVIEW: CLEAN`, the round closes early and
@@ -341,8 +357,43 @@ Once every specialist has finished its Phase 2 loop:
 
 ## Phase 4 — Decompose into a task DAG
 
-Spawn one `task-specialist` with the full merged and reconciled spec (foreground is fine here —
-nothing else can proceed until it returns). It applies the decomposition rules in its own agent
+**Distill first (inert if the `meter` subsystem isn't installed).** Every `dag-distill.py`
+reference below means: locate it the same way `/dag-meter` does (`${CLAUDE_PLUGIN_ROOT}/scripts/
+dag-distill.py`, falling back to searching `~/.claude/plugins` for a `yolo-dag` checkout, falling
+back to `scripts/dag-distill.py` relative to the current directory) and run it with `python3` —
+the plugin isn't necessarily under the current directory. Before spawning `task-specialist`, check
+whether a compiled brief for this exact spec already exists: `dag-distill.py check
+<run-dir>/merged-spec.md`. Exit `0` with output means a cached brief exists (an identical spec was
+distilled before, this run or a prior one) — use its printed content in place of the full spec
+below and skip straight to spawning `task-specialist`. Exit `1` means no cache hit; compile fresh:
+
+1. Spawn `spec-distiller` in **compile mode**, foreground, with the full merged spec and
+   `meter.modules.distill.probe_count` (default 25, use 25 if `meter` config isn't readable) as
+   the number of verification questions to generate. It returns a brief and a set of
+   question/answer pairs.
+2. Spawn `spec-distiller` again — a **fresh spawn**, not a resume — in **verify mode**, foreground,
+   with only the brief and the bare questions (never the answers, never the full spec).
+3. **Grade it yourself.** Compare the verify pass's answers against the compile pass's stored
+   answers, question by question. Any answer that's wrong, or "not answerable from the brief," is
+   a miss. **Any miss at all rejects the brief** — this is what makes Distill "verified" rather
+   than a hopeful compression, so don't round up a near-miss.
+4. **On a miss**, `SendMessage` the compile-mode spawn (resume it, don't respawn) naming exactly
+   which questions it missed and why, and ask it to revise the brief to cover those gaps. Re-run
+   the verify pass (a fresh spawn again) once. If it passes this second attempt, proceed with the
+   revised brief. **If it fails again, give up on distillation for this spec**: use the full spec
+   for `task-specialist` below, and note the failure in one line in your final report (this is a
+   real degradation worth surfacing, same spirit as the existing budget degradation channel).
+5. **On a full pass** (first or second attempt), cache it: `python3 scripts/dag-distill.py store
+   <run-dir>/merged-spec.md <brief-file>` (write the brief to a temp file first, or pipe it in
+   however is convenient). Use the brief in place of the full spec below.
+
+Spawn one `task-specialist` with the full merged and reconciled spec, or — if Distill produced a
+brief that passed its gate — the brief instead, stating plainly that the full spec is at
+`<run-dir>/merged-spec.md` if `task-specialist` needs something the brief doesn't cover (if it
+says it does, tell it to Read that path, and afterward run `python3 scripts/dag-distill.py
+record-fetch <run-dir>/merged-spec.md` — this is the fetch-rate signal that tells a future
+tuning pass the brief was too thin). Foreground either way — nothing else can proceed until it
+returns. It applies the decomposition rules in its own agent
 definition — **independence first, shared contracts where a boundary is unavoidable, a real
 `depends_on` edge only as a last resort** — and returns both a human-readable task list and a
 fenced `json` block carrying `contracts` and `tasks`.
@@ -483,8 +534,13 @@ the whole DAG landing at once. It happens in both run types, plan-only and full 
    `run_in_background: true`, with the task's acceptance criteria, the current text of its
    contracts, the worker's report, and — critically — the worker's `WORKTREE` path and `COMMIT`
    sha, so it verifies the actual work (`git -C <worktree> ...`) rather than the main tree, where
-   the changes do not exist. Tasks in a pass move through their own cycles independently; the
-   barrier is at the end of the pass, not between its stages.
+   the changes do not exist. Restate those two values as their own literal lines,
+   `WORKTREE: <path>` and `COMMIT: <sha>`, somewhere in the reviewer's prompt (same "inert if
+   `meter` isn't installed" pattern as the `DAG-NODE:` line above) — this is the only way a local
+   measurement tool can find the worktree/commit to run deterministic checks against before the
+   reviewer starts; without a fixed format, it has no reliable way to locate them in free-form
+   prose. Tasks in a pass move through their own cycles independently; the barrier is at the end
+   of the pass, not between its stages.
 8. **Read each reviewer's verdict from the literal `VERDICT: PASS` / `VERDICT: FLAGGED` line at
    the end of its final message.** Do not branch on a `ReportFindings` tool call — that renders to
    the host UI and is not the channel you receive. If a reviewer somehow returns no verdict line,

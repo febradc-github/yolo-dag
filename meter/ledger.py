@@ -22,7 +22,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import attribution
+from . import echo
+from . import governor
+from . import oracle
+from . import quorum
 from . import store
+from . import throttle
 
 _DAG_NODE_RE = re.compile(r"DAG-NODE:\s*([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
 
@@ -74,14 +80,18 @@ class Correlator:
     """
 
     def __init__(self) -> None:
-        self._queues: dict[str, list[tuple[float, str, str]]] = {}
+        self._queues: dict[str, list[tuple[float, str, str, str]]] = {}
         self._lock = threading.Lock()
 
-    def push(self, session_id: str, run_id: str, node_id: str) -> None:
+    def push(self, session_id: str, run_id: str, node_id: str, prompt_text: str = "") -> None:
         with self._lock:
-            self._queues.setdefault(session_id, []).append((time.time(), run_id, node_id))
+            self._queues.setdefault(session_id, []).append(
+                (time.time(), run_id, node_id, prompt_text))
 
-    def claim(self, session_id: str) -> tuple[str, str] | None:
+    def claim(self, session_id: str) -> tuple[str, str, str] | None:
+        """Returns (run_id, node_id, prompt_text). `prompt_text` is the Task
+        prompt seen at PreToolUse — carried through so M4 Echo can attribute
+        it to the agent_id that only becomes known here, at SubagentStart."""
         with self._lock:
             queue = self._queues.get(session_id)
             if not queue:
@@ -91,8 +101,8 @@ class Correlator:
                 queue.pop(0)
             if not queue:
                 return None
-            _, run_id, node_id = queue.pop(0)
-            return run_id, node_id
+            _, run_id, node_id, prompt_text = queue.pop(0)
+            return run_id, node_id, prompt_text
 
 
 def parse_transcript_usage(transcript_path: str) -> dict[str, Any]:
@@ -208,6 +218,9 @@ def record_subagent_stop(conn: sqlite3.Connection, *, run_id: str | None, node_i
         "source": "live",
         "started_at": started_at,
         "ended_at": ended_at,
+        # M6 Governor 6b's proxy signal (meter/governor.py) — the final tally
+        # of every PreToolUse call this agent_id made, if any were counted.
+        "call_count": store.get_tool_call_count(conn, agent_id) or None,
     }
     store.upsert_ledger_row(conn, row)
     store.append_ledger_round(conn, {
@@ -221,9 +234,11 @@ def record_subagent_stop(conn: sqlite3.Connection, *, run_id: str | None, node_i
 
 
 def write_run_artifacts(conn: sqlite3.Connection, run_dir: Path, run_id: str,
-                         run_json: dict | None) -> None:
+                         run_json: dict | None, plugin_data_dir: Path | None = None) -> None:
     """Regenerate ledger.jsonl and report.md for one run from the SQLite ledger.
-    Idempotent and cheap enough to call after every SubagentStop for that run."""
+    Idempotent and cheap enough to call after every SubagentStop for that run.
+    `plugin_data_dir` is optional so existing callers don't break; without it,
+    the report simply has no Governor section (6c/6d — see meter/governor.py)."""
     meter_dir = run_dir / "meter"
     meter_dir.mkdir(parents=True, exist_ok=True)
     rows = store.get_ledger_rows(conn, run_id)
@@ -232,11 +247,26 @@ def write_run_artifacts(conn: sqlite3.Connection, run_dir: Path, run_id: str,
         for row in rows:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
 
-    report = _render_report(rows, run_id, run_json)
+    echo_rows = store.get_echo_rows(conn, run_id)
+    governor_section = (governor.report_section(plugin_data_dir, run_id, conn)
+                         if plugin_data_dir is not None else None)
+    narration_section = throttle.render_report_section(store.get_narration_rows(conn, run_id))
+    oracle_section = oracle.render_report_section(conn, run_id)
+    attribution_section = attribution.render_report_section(conn, run_id)
+    quorum_section = quorum.render_report_section(conn)
+    report = _render_report(rows, run_id, run_json, echo_rows, governor_section,
+                             narration_section, oracle_section, attribution_section,
+                             quorum_section)
     (meter_dir / "report.md").write_text(report, encoding="utf-8")
 
 
-def _render_report(rows: list[dict], run_id: str, run_json: dict | None) -> str:
+def _render_report(rows: list[dict], run_id: str, run_json: dict | None,
+                    echo_rows: list[dict] | None = None,
+                    governor_section: str | None = None,
+                    narration_section: str | None = None,
+                    oracle_section: str | None = None,
+                    attribution_section: str | None = None,
+                    quorum_section: str | None = None) -> str:
     total_in = sum(r["in_tok"] or 0 for r in rows)
     total_out = sum(r["out_tok"] or 0 for r in rows)
     total_cache_read = sum(r["cache_read"] or 0 for r in rows)
@@ -285,6 +315,31 @@ def _render_report(rows: list[dict], run_id: str, run_json: dict | None) -> str:
             label = r.get("node") or f"{r.get('agent_type')}/{r.get('agent_id', '')[:8]}"
             lines.append(f"  {label:<40} {r['in_tok'] or 0:>8,} in  {r['out_tok'] or 0:>8,} out")
 
+    echo_section = echo.render_report_section(echo_rows) if echo_rows else None
+    if echo_section:
+        lines.append("")
+        lines.append(echo_section)
+
+    if governor_section:
+        lines.append("")
+        lines.append(governor_section)
+
+    if narration_section:
+        lines.append("")
+        lines.append(narration_section)
+
+    if oracle_section:
+        lines.append("")
+        lines.append(oracle_section)
+
+    if attribution_section:
+        lines.append("")
+        lines.append(attribution_section)
+
+    if quorum_section:
+        lines.append("")
+        lines.append(quorum_section)
+
     return "\n".join(lines) + "\n"
 
 
@@ -311,8 +366,9 @@ def find_latest_run(repo_root: Path) -> tuple[str, Path] | None:
 def update_baseline(plugin_data_dir: Path, repo_fingerprint: str, mode: str,
                      rows: list[dict]) -> None:
     """Aggregate stats for the Governor's cost model (meter-handoff.md Section 6d /
-    M6a), keyed by repo fingerprint and mode. M0 only writes this; nothing reads it
-    yet — the Governor ships in a later milestone."""
+    M6a), keyed by repo fingerprint and mode. Read by meter/governor.py's
+    `recalibrate_weights` (6a, token-based) and `predict_call_budget` (6b,
+    the call-count proxy — see governor.py's module docstring)."""
     baseline_path = plugin_data_dir / "baseline.json"
     try:
         baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
@@ -325,11 +381,19 @@ def update_baseline(plugin_data_dir: Path, repo_fingerprint: str, mode: str,
     for row in rows:
         agent_type = row.get("agent_type") or "unknown"
         agg = entry["by_agent_type"].setdefault(
-            agent_type, {"samples": 0, "in_tok_total": 0, "out_tok_total": 0})
+            agent_type, {"samples": 0, "in_tok_total": 0, "out_tok_total": 0,
+                         "call_samples": 0, "calls_total": 0})
+        # A baseline.json written before M6 existed has agent_type entries
+        # missing the two call_* keys — top them up rather than KeyError.
+        agg.setdefault("call_samples", 0)
+        agg.setdefault("calls_total", 0)
         if row.get("in_tok") is not None:
             agg["samples"] += 1
             agg["in_tok_total"] += row["in_tok"]
             agg["out_tok_total"] += row.get("out_tok") or 0
+        if row.get("call_count") is not None:
+            agg["call_samples"] += 1
+            agg["calls_total"] += row["call_count"]
 
     try:
         plugin_data_dir.mkdir(parents=True, exist_ok=True)

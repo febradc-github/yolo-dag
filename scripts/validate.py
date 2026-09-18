@@ -56,6 +56,7 @@ PRIMARY_PHASE = {
     "spec-reviewer": 2,
     "spec-consolidator": 2,
     "spec-reconciler": 3,
+    "spec-distiller": 4,
     "task-specialist": 4,
     "task-worker": 5,
     "task-reviewer": 5,
@@ -109,7 +110,13 @@ FORBIDDEN_TOOLS = {
 }
 
 # Agents that inspect a codebase need real search tools rather than shelling out to grep.
-NEEDS_SEARCH = set(PRIMARY_PHASE) - {"spec-consolidator"}
+NEEDS_SEARCH = set(PRIMARY_PHASE) - {"spec-consolidator", "spec-distiller"}
+
+# Agents expected to emit a ```dag-receipt block per meter-handoff.md Section 4/M1 —
+# the ones whose completion is a DAG node the daemon's SubagentStop handler validates.
+# Specialists are excluded: M1's receipt is a node-completion record, and specialist
+# output isn't gated the same way task-worker/task-reviewer output is.
+RECEIPT_AGENTS = {"task-worker", "task-reviewer"}
 
 errors: list[str] = []
 warnings: list[str] = []
@@ -450,6 +457,56 @@ def check_meter_hooks() -> None:
                              f"match meter/config.py's DEFAULT_PORT {default_port}")
 
 
+def check_receipts(agents: dict[str, dict]) -> None:
+    """meter-handoff.md Section 6.6 items 3-4: every agent expected to emit a
+    dag-receipt block actually has one in its template, the example JSON inside
+    it parses and is schema-valid, and its declared `v` matches the schema the
+    daemon (meter/receipts.py) actually loads. Item 5 (existing status-line
+    contracts still present) is already covered by check_agents' CONTRACTS
+    loop — the receipt block is required to be additive to those, never a
+    replacement, so this function only needs to check the new block itself."""
+    schema_path = ROOT / "meter" / "schemas" / "receipt.v1.json"
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"meter/schemas/receipt.v1.json: {exc}")
+        return
+
+    sys.path.insert(0, str(ROOT))
+    try:
+        from meter import schema_lite  # noqa: PLC0415
+    except Exception as exc:
+        fail(f"could not import meter.schema_lite to validate receipt examples: {exc!r}")
+        return
+
+    for stem in sorted(RECEIPT_AGENTS):
+        agent = agents.get(stem)
+        if agent is None:
+            continue  # already reported missing by check_agents
+        rel = f"agents/{stem}.md"
+        body = agent["body"]
+
+        match = re.search(r"```dag-receipt\s*\n(.*?)\n```", body, re.DOTALL)
+        if not match:
+            fail(f"{rel}: expected to emit a receipt (M1) but has no ```dag-receipt block")
+            continue
+
+        try:
+            example = json.loads(match.group(1))
+        except json.JSONDecodeError as exc:
+            fail(f"{rel}: ```dag-receipt block's example JSON does not parse: {exc}")
+            continue
+
+        example_errors = schema_lite.validate(example, schema)
+        if example_errors:
+            fail(f"{rel}: ```dag-receipt example fails schemas/receipt.v1.json: "
+                 f"{'; '.join(example_errors)}")
+
+        if example.get("v") != schema.get("properties", {}).get("v", {}).get("const"):
+            fail(f"{rel}: dag-receipt example's \"v\" does not match the schema version "
+                 f"the daemon parses")
+
+
 def check_evals() -> None:
     """Each eval case's declared name must match its directory, or --case filtering and
     the results layout silently target the wrong case."""
@@ -484,6 +541,7 @@ def main() -> int:
     check_hint_length()
     check_run_json_schema()
     check_meter_hooks()
+    check_receipts(agents)
     check_evals()
 
     for w in warnings:
