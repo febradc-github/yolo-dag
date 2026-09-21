@@ -198,6 +198,27 @@ run two tasks with overlapping ownership in the same pass regardless.
 - **Persist as you go, don't batch it up.** Every phase writes its artifacts to the run directory
   *as it completes*, not at the end. A run that dies at Phase 5 must leave Phases 1–4 fully
   recoverable on disk.
+- **Spec-producing agents write their own deliverables.** Every agent that produces a
+  document-sized artifact — a specialist deliverable, reviewer findings, a consolidated list, the
+  reconciler's rulings, a distilled brief, the task graph — carries `Write`, scoped to the exact
+  path you give it in its prompt, and writes there directly instead of returning the full
+  deliverable in its final chat message. Give it that path explicitly every time you spawn or
+  resume it; it should never have to guess where its own output belongs, and it must never write
+  anywhere else (only its own named artifact — project files are `task-worker`'s alone). This is
+  not a formatting nicety: forcing a large document through a single final chat message is what
+  has caused this pipeline's worst observed stalls — a reconciler hitting the output-token ceiling
+  mid-document, twice, on one run, needing a human to hand it manual chunking instructions before
+  the run could continue; several reviewers and consolidators returning truncated "receipt-only"
+  finals that needed a resume just to get the real content out. A `Write` call has no equivalent
+  ceiling. The same logic applies to what *you* hand an agent: give it the path to its input
+  (`Read` it yourself, or point the agent at it) rather than pasting a large upstream artifact
+  inline — nothing should be restated in full at every hop of the pipeline.
+- **Depth proportional to the request.** A deliverable's length and exhaustiveness should track
+  what this specific request actually needs decided, not a fixed template's checklist. A
+  single-file, client-only page needs a short architecture note, not an enterprise-scale document;
+  say so when you spawn a specialist if the request's scope is obviously small. Padding isn't
+  thoroughness — it's the same failure mode as the point above, just below the threshold where
+  anything breaks outright.
 - **Once an artifact is written, your memory of it is its path, not its text.** Re-read
   `merged-spec.md`, `tasks.json`, or a specialist's round file from `.dag/runs/<run-id>/` at the
   point of use instead of carrying full artifact text forward in context. A `full` run outlives
@@ -273,9 +294,10 @@ test-planning, data-schema, security — skipping design/ux-copy (no user-facing
 
 **Then fan out.** In a single turn, issue one `Agent` call per selected specialist,
 `run_in_background: true`, giving each the fully-specified request verbatim, framed for its
-domain. Note every spawn name — you need them for Phase 2's and Phase 3's `SendMessage` resumes —
-and record each specialist in `run.json`'s `specialists` array (`{"name": ..., "spawn": ...,
-"rounds": 0, "status": "drafting"}`).
+domain, plus the exact path it must `Write` its deliverable to:
+`<run-dir>/specialists/<name>/round-0.md`. Note every spawn name — you need them for Phase 2's and
+Phase 3's `SendMessage` resumes — and record each specialist in `run.json`'s `specialists` array
+(`{"name": ..., "spawn": ..., "rounds": 0, "status": "drafting"}`).
 
 Don't block waiting on them one at a time; let completion notifications arrive and track against
 your roster.
@@ -285,36 +307,41 @@ your roster.
 Run this once per specialist, starting as soon as that specialist's first draft lands (don't
 wait for all of them — they can be at different rounds simultaneously):
 
-1. Spawn 3 `spec-reviewer` agents in one batch, `run_in_background: true`, each given the
-   specialist's current deliverable, the original request, and one of the three named angles
-   defined in the `spec-reviewer` agent file: **completeness/gaps**, **internal consistency**
-   (spawn this one with `model: "sonnet"` — the one model override this pipeline makes, for
-   decorrelation), and **feasibility/risk**. **Meter's adaptive quorum (v2 M8, inert unless
-   `meter.modules.quorum.enabled` is explicitly set true, which it is not by default) may narrow
-   this to 1 reviewer for a specialist domain the daemon has measured, over 50+ full runs, adds
-   nothing beyond what one reviewer already catches — see `meter/quorum.py`. Absent that
-   measurement (the default state, and the only state possible before this plugin has real run
-   history), always spawn all 3 exactly as written here; this is not something to reason about
-   per run.**
-2. Each reviewer ends its final message with `REVIEW: CLEAN` or `REVIEW: FINDINGS <n>`. **Read
-   that line, not a tool call** — reviewers do not call `ReportFindings` (they review prose, which
-   has no file or line to anchor to). If all 3 report `REVIEW: CLEAN`, the round closes early and
-   this specialist is done; skip to step 5.
-3. Otherwise spawn 1 `spec-consolidator`, `run_in_background: true`, with all 3 raw finding sets.
-   It returns a ranked, deduplicated list ending in `CONSOLIDATED: <n>`. If the count is `0`,
-   the round closes — deduplication can dissolve three near-findings into nothing, and an empty
-   list is not worth a revision round.
-4. `SendMessage` that list to the specialist **by its Phase 1 spawn name** — never a fresh spawn
-   — asking it to accept valid findings, push back with reasoning on the rest, and return a
-   revised deliverable.
+1. Spawn 3 `spec-reviewer` agents in one batch, `run_in_background: true`, each given the path to
+   the specialist's current deliverable (`<run-dir>/specialists/<name>/round-<n>.md` — it `Read`s
+   this itself), the original request, one of the three named angles defined in the
+   `spec-reviewer` agent file — **completeness/gaps**, **internal consistency** (spawn this one
+   with `model: "sonnet"` — the one model override this pipeline makes, for decorrelation), and
+   **feasibility/risk** — and the exact path it must `Write` its findings to:
+   `<run-dir>/specialists/<name>/round-<r>-findings-<angle>.md` (`r` is this review round's
+   number, starting at 1; `angle` one of `completeness`/`consistency`/`feasibility`). **Meter's
+   adaptive quorum (v2 M8, inert unless `meter.modules.quorum.enabled` is explicitly set true,
+   which it is not by default) may narrow this to 1 reviewer for a specialist domain the daemon
+   has measured, over 50+ full runs, adds nothing beyond what one reviewer already catches — see
+   `meter/quorum.py`. Absent that measurement (the default state, and the only state possible
+   before this plugin has real run history), always spawn all 3 exactly as written here; this is
+   not something to reason about per run.**
+2. Each reviewer ends its final message with a short confirmation of what it wrote, then
+   `REVIEW: CLEAN` or `REVIEW: FINDINGS <n>`. **Read that line, not a tool call** — reviewers do
+   not call `ReportFindings` (they review prose, which has no file or line to anchor to). If all 3
+   report `REVIEW: CLEAN`, the round closes early and this specialist is done; skip to step 5.
+3. Otherwise spawn 1 `spec-consolidator`, `run_in_background: true`, with the paths to the 3
+   finding files (it `Read`s them itself) and the path it must `Write` its consolidated list to:
+   `<run-dir>/specialists/<name>/round-<r>-consolidated.md`. It ends with a short confirmation and
+   `CONSOLIDATED: <n>`. If the count is `0`, the round closes — deduplication can dissolve three
+   near-findings into nothing, and an empty list is not worth a revision round.
+4. `SendMessage` the specialist **by its Phase 1 spawn name** — never a fresh spawn — pointing it
+   at the consolidated-findings path (it `Read`s that itself) and the path for its revised
+   deliverable, `<run-dir>/specialists/<name>/round-<r>.md`, asking it to accept valid findings,
+   push back with reasoning on the rest, and write a revised deliverable there.
 5. That's one round. Repeat 1–4 up to the mode's round cap (3 in `full`, 1 in `lite`) — but stop
    early on **diminishing returns**: if the specialist's revision accepted *none* of the round's
    findings (it pushed back on everything), don't spend another round re-litigating — a further
    identical round rarely moves a considered pushback. Carry anything a reviewer would still
    stand behind forward as an Open Concern instead.
-6. Write each round's deliverable and consolidated findings to
-   `<run-dir>/specialists/<name>/round-<n>.md` as the round completes, and update that
-   specialist's `rounds`/`status` in `run.json`.
+6. Each round's deliverable and consolidated findings are already on disk at the paths above,
+   written by the agents themselves as they completed — update that specialist's `rounds`/`status`
+   in `run.json`, and re-read a file at the point of use rather than carrying its text forward.
 7. **If the last round completes and a finding is still unresolved** — the specialist pushed back
    on something a reviewer would still stand by — don't loop another round and don't silently
    drop it. Take the specialist's last deliverable as final, and carry the unresolved finding
@@ -324,26 +351,32 @@ wait for all of them — they can be at different rounds simultaneously):
 
 Once every specialist has finished its Phase 2 loop:
 
-1. **Merge.** You (not a spawned agent) assemble the combined build spec directly: concatenate
-   each specialist's final deliverable under its own heading (Design Spec, Architecture Spec,
-   Research Notes, Security Spec, Test Plan, Cost & Resource Estimate, UX Copy, Data & Schema
-   Spec — only those that ran), followed by an `## Open Concerns` section listing anything carried
-   over from Phase 2 step 7, attributed to the specialist it came from. Write it to
-   `<run-dir>/merged-spec.md`.
+1. **Merge.** You (not a spawned agent) assemble the combined build spec directly: `Read` each
+   specialist's final deliverable from its own path on disk (never carry it forward from context —
+   it was written there as Phase 2 completed) and concatenate them under their own headings
+   (Design Spec, Architecture Spec, Research Notes, Security Spec, Test Plan, Cost & Resource
+   Estimate, UX Copy, Data & Schema Spec — only those that ran), followed by an `## Open Concerns`
+   section listing anything carried over from Phase 2 step 7, attributed to the specialist it came
+   from. Write it to `<run-dir>/merged-spec.md`.
 
-2. **Reconcile.** Spawn one `spec-reconciler` with the full merged spec. Every review loop up to
-   this point was *intra*-specialist — three reviewers on one deliverable, blind to its siblings —
-   so nothing so far could catch two deliverables that are each internally excellent and mutually
-   incompatible. This is the pass that does.
+2. **Reconcile.** Spawn one `spec-reconciler` with the path to the merged spec (it `Read`s it
+   itself) and the path it must `Write` its rulings to, `<run-dir>/reconcile.md`. Every review loop
+   up to this point was *intra*-specialist — three reviewers on one deliverable, blind to its
+   siblings — so nothing so far could catch two deliverables that are each internally excellent
+   and mutually incompatible. This is the pass that does.
 
-   It returns `RECONCILE: CLEAN` or `RECONCILE: CONTRADICTIONS <n>`.
+   It ends with a short confirmation, then `RECONCILE: CLEAN` or `RECONCILE: CONTRADICTIONS <n>`.
 
 3. **Resolve contradictions.** For each one, `SendMessage` it to **both** named specialists (they
-   are still resumable from Phase 1) asking each to either adopt the other's position or state
-   why theirs should stand. Update the merged spec with whatever they settle on. If they still
-   disagree after one exchange, promote it to an Open Concern rather than looping — one round of
-   reconciliation is enough to catch honest mismatches, and a second rarely changes a genuine
-   judgment call. Write the outcome to `<run-dir>/reconcile.md`.
+   are still resumable from Phase 1), pointing at the same `round-<n>.md` path each already owns,
+   asking each to either adopt the other's position and overwrite that file in place, or state why
+   theirs should stand and leave it unchanged. If they still disagree after one exchange, promote
+   it to an Open Concern rather than looping — one round of reconciliation is enough to catch
+   honest mismatches, and a second rarely changes a genuine judgment call. `reconcile.md` is
+   already on disk, written directly by the reconciler; append the resolution outcome to it rather
+   than rewriting the whole file. **If any specialist's file actually changed**, redo the Merge
+   step above (re-`Read` and re-concatenate) so `merged-spec.md` reflects it — it does not update
+   itself.
 
 4. **Show the user the merged spec and move straight into Phase 4** — don't wait for a go/no-go
    by default, same reasoning as the ground rules: the user wants the finished work, not a
@@ -367,38 +400,44 @@ whether a compiled brief for this exact spec already exists: `dag-distill.py che
 distilled before, this run or a prior one) — use its printed content in place of the full spec
 below and skip straight to spawning `task-specialist`. Exit `1` means no cache hit; compile fresh:
 
-1. Spawn `spec-distiller` in **compile mode**, foreground, with the full merged spec and
-   `meter.modules.distill.probe_count` (default 25, use 25 if `meter` config isn't readable) as
-   the number of verification questions to generate. It returns a brief and a set of
-   question/answer pairs.
+1. Spawn `spec-distiller` in **compile mode**, foreground, with the path to the merged spec (it
+   `Read`s it itself), `meter.modules.distill.probe_count` (default 25, use 25 if `meter` config
+   isn't readable) as the number of verification questions to generate, and the two paths it must
+   `Write` to: `<run-dir>/brief.md` and `<run-dir>/distill-answer-key.md`.
 2. Spawn `spec-distiller` again — a **fresh spawn**, not a resume — in **verify mode**, foreground,
-   with only the brief and the bare questions (never the answers, never the full spec).
-3. **Grade it yourself.** Compare the verify pass's answers against the compile pass's stored
-   answers, question by question. Any answer that's wrong, or "not answerable from the brief," is
-   a miss. **Any miss at all rejects the brief** — this is what makes Distill "verified" rather
-   than a hopeful compression, so don't round up a near-miss.
+   with only the path to the brief (`<run-dir>/brief.md` — it `Read`s it itself) and the bare
+   questions (strip the answers out of `distill-answer-key.md` yourself before passing them —
+   never the answers, never the full spec).
+3. **Grade it yourself.** `Read` `<run-dir>/distill-answer-key.md` for the stored answers and
+   compare the verify pass's answers against them, question by question. Any answer that's wrong,
+   or "not answerable from the brief," is a miss. **Any miss at all rejects the brief** — this is
+   what makes Distill "verified" rather than a hopeful compression, so don't round up a near-miss.
 4. **On a miss**, `SendMessage` the compile-mode spawn (resume it, don't respawn) naming exactly
-   which questions it missed and why, and ask it to revise the brief to cover those gaps. Re-run
-   the verify pass (a fresh spawn again) once. If it passes this second attempt, proceed with the
-   revised brief. **If it fails again, give up on distillation for this spec**: use the full spec
-   for `task-specialist` below, and note the failure in one line in your final report (this is a
-   real degradation worth surfacing, same spirit as the existing budget degradation channel).
+   which questions it missed and why, and ask it to revise `brief.md` in place to cover those gaps.
+   Re-run the verify pass (a fresh spawn again) once, against the same path. If it passes this
+   second attempt, proceed with the revised brief. **If it fails again, give up on distillation for
+   this spec**: use the full spec (`<run-dir>/merged-spec.md`) for `task-specialist` below, and
+   note the failure in one line in your final report (this is a real degradation worth surfacing,
+   same spirit as the existing budget degradation channel).
 5. **On a full pass** (first or second attempt), cache it: `python3 scripts/dag-distill.py store
-   <run-dir>/merged-spec.md <brief-file>` (write the brief to a temp file first, or pipe it in
-   however is convenient). Use the brief in place of the full spec below.
+   <run-dir>/merged-spec.md <run-dir>/brief.md` — the brief is already on disk at that path, so no
+   temp file needed. Use `<run-dir>/brief.md` in place of the full spec below.
 
-Spawn one `task-specialist` with the full merged and reconciled spec, or — if Distill produced a
-brief that passed its gate — the brief instead, stating plainly that the full spec is at
+Spawn one `task-specialist` with the path to the full merged and reconciled spec
+(`<run-dir>/merged-spec.md`), or — if Distill produced a brief that passed its gate — the path to
+the brief instead (`<run-dir>/brief.md`), stating plainly that the full spec is at
 `<run-dir>/merged-spec.md` if `task-specialist` needs something the brief doesn't cover (if it
 says it does, tell it to Read that path, and afterward run `python3 scripts/dag-distill.py
 record-fetch <run-dir>/merged-spec.md` — this is the fetch-rate signal that tells a future
-tuning pass the brief was too thin). Foreground either way — nothing else can proceed until it
-returns. It applies the decomposition rules in its own agent
-definition — **independence first, shared contracts where a boundary is unavoidable, a real
-`depends_on` edge only as a last resort** — and returns both a human-readable task list and a
-fenced `json` block carrying `contracts` and `tasks`.
+tuning pass the brief was too thin), plus the path it must `Write` the task graph to:
+`<run-dir>/tasks.json`. Foreground either way — nothing else can proceed until it returns. It
+applies the decomposition rules in its own agent definition — **independence first, shared
+contracts where a boundary is unavoidable, a real `depends_on` edge only as a last resort** —
+writes the graph directly to `tasks.json`, and returns a short human-readable summary (contracts,
+a one-line-per-task list, folds/assumptions made) rather than pasting the graph inline.
 
-**Validate the graph before executing it.** Persist the JSON to `<run-dir>/tasks.json`, then check:
+**Validate the graph before executing it.** `Read` `<run-dir>/tasks.json` — written directly by
+`task-specialist` — then check:
 
 - every id is unique;
 - every `depends_on` entry names a task that exists, and carries a `reason`;

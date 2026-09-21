@@ -114,13 +114,25 @@ Every phase persists to `.dag/runs/<run-id>/` as it completes:
 │                         #   degradations
 ├── request.md            # the restated request + stated assumptions
 ├── routing.md            # which specialists were selected, and why the rest weren't
-├── specialists/<name>/round-{1,2,3}.md
-├── merged-spec.md
-├── reconcile.md          # cross-specialist contradictions and how each resolved
-├── tasks.json            # the task graph and its shared contracts, with per-task status
-│                         #   and attempt count
+├── specialists/<name>/
+│   ├── round-0.md                      # initial draft — written directly by the specialist
+│   ├── round-<n>-findings-<angle>.md   # each reviewer's findings for round n — written by it
+│   ├── round-<n>-consolidated.md       # round n's merged findings — written by the consolidator
+│   └── round-<n>.md                    # the specialist's revision after round n
+├── merged-spec.md        # every specialist's final round file, concatenated by the orchestrator
+├── reconcile.md          # cross-specialist contradictions and rulings — written directly by
+│                         #   spec-reconciler
+├── brief.md, distill-answer-key.md   # meter's Distill brief + its verification Q/A, if it ran
+├── tasks.json            # the task graph and its shared contracts — written directly by
+│                         #   task-specialist, with per-task status and attempt count added as
+│                         #   execution proceeds
 └── integration.md        # the integrated suite result + the acceptance review
 ```
+
+Every file above that a spawned agent produces is written **directly by that agent**, to the exact
+path the orchestrator hands it — never pasted through a chat message and re-written by the
+orchestrator. See [Design: agents write their own deliverables](#design-agents-write-their-own-deliverables)
+below for why.
 
 `run.json` is the source of truth for code (commands and resume branch on its `phases` map — an
 entry is only marked complete after its artifacts are fully written); the markdown files are the
@@ -304,6 +316,39 @@ in parallel (anything with no unresolved edges pointing into it).
   can't express "try again, up to N times" on its own. The same discipline bounds the other two
   feedback paths: a contract can be revised once, and when most task failures classify the *spec*
   as the problem, the graph goes back to `task-specialist` for correction exactly once per run.
+
+## Design: agents write their own deliverables
+
+Every agent that produces a document-sized artifact — a specialist's deliverable, a reviewer's
+findings, a consolidator's merged list, the reconciler's cross-specialist rulings, a distilled
+brief, the task graph — carries `Write`, scoped to the one path the orchestrator hands it in its
+prompt, and writes there directly. Its final chat message is a short confirmation (the path, plus
+a one-line summary or the literal status line its role requires), not the deliverable itself.
+
+This is a deliberate performance choice, not a formatting preference. Earlier, every one of those
+agents had no `Write` tool at all and had to return its full deliverable inline, in one final
+message, for the orchestrator to persist on its behalf. A single chat message has its own
+output-token ceiling, and a document this pipeline produces routinely — a merged spec assembled
+from several specialists, a reconciler's full set of cross-specialist rulings — can exceed it
+outright. Hitting that ceiling doesn't fail loudly: the agent's message truncates or comes back as
+a bare "done" with none of the actual content, and recovery means noticing the truncation and
+spending a whole extra resume-and-re-emit round just to get the real output out. Observed on a
+single real run: a reconciler hit that ceiling twice on one document and needed a human to
+manually chunk its output before the run could continue, and several reviewers/consolidators
+returned truncated finals that each cost a resume. None of that is inherent to the work being
+reviewed — it's an artifact of the transport, and a `Write` call has no equivalent ceiling.
+
+It also compounds going the other direction: giving the *next* agent a path to `Read` instead of
+pasting a large upstream artifact into its prompt means nothing gets restated in full at every
+handoff — a reviewer's findings aren't retyped into the consolidator's prompt, the consolidator's
+merged list isn't retyped into the `SendMessage` that resumes the specialist, and so on. Smaller
+prompts at every hop mean faster responses at every hop.
+
+None of this changes what gets decided — the same number of specialists, review rounds, and tasks
+run, at the same depth. It only changes how a deliverable travels once a decision has been made.
+Deliverable depth is still expected to track the request's actual complexity (a single-file,
+client-only page doesn't need enterprise-scale documentation regardless of how it's transported) —
+that's a separate, complementary discipline, not something this mechanism enforces on its own.
 
 ## Meter (on by default, measurement only)
 
