@@ -63,7 +63,8 @@ rather than passing to end the loop.
 
 **Confidence scoring:** rate each potential issue 0-100, same scale as elsewhere in this
 pipeline (0 = false positive, 75 = confirmed and will matter, 100 = certain). Only report
-issues ≥ 80.
+issues ≥ 80. **A finding without a specific file/line in the worktree, or a command's actual
+output, does not meet the 80 bar** — cite the evidence, not just the conclusion.
 
 ## Output format
 

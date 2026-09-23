@@ -50,6 +50,13 @@ class CheckSecretsTests(unittest.TestCase):
         result = sieve.check_secrets('+ password = "x"\n')
         self.assertTrue(result["passed"])
 
+    def test_diff_unavailable_reports_not_ran_rather_than_passed(self):
+        # A plumbing failure to obtain the diff must never look like "no
+        # secrets found" — that would be a false "verified clean" claim.
+        result = sieve.check_secrets("", diff_available=False)
+        self.assertFalse(result["ran"])
+        self.assertIsNotNone(result["reason"])
+
 
 class CheckOwnershipTests(unittest.TestCase):
     def setUp(self):
@@ -89,6 +96,36 @@ class CheckOwnershipTests(unittest.TestCase):
     def test_nonexistent_worktree_reports_not_ran(self):
         result = sieve.check_ownership(self.repo_root, "/nonexistent/path", "HEAD", ["src/a.py"])
         self.assertFalse(result["ran"])
+
+    def test_multi_commit_task_fully_captured_via_integration_branch(self):
+        # The bug this guards: a worker that makes TWO commits for one task
+        # used to only ever have its LAST commit diffed, so a violation in an
+        # earlier commit was silently missed while the checker still declared
+        # the whole task covered.
+        _git(self.repo_root, "branch", "dag/run-x")  # integration branch at the pre-task tip
+        self._commit_change("src/b.py", "y = 2\n")  # commit 1: outside owns
+        commit2 = self._commit_change("src/a.py", "x = 2\n")  # commit 2: inside owns
+
+        result = sieve.check_ownership(self.repo_root, str(self.repo_root), commit2, ["src/a.py"],
+                                        integration_branch="dag/run-x")
+        self.assertTrue(result["ran"])
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("src/b.py" in f for f in result["findings"]))
+
+    def test_single_commit_case_still_passes_via_integration_branch(self):
+        _git(self.repo_root, "branch", "dag/run-x")
+        commit = self._commit_change("src/a.py", "x = 2\n")
+        result = sieve.check_ownership(self.repo_root, str(self.repo_root), commit, ["src/a.py"],
+                                        integration_branch="dag/run-x")
+        self.assertTrue(result["ran"])
+        self.assertTrue(result["passed"])
+
+    def test_declines_rather_than_narrows_when_integration_branch_unresolvable(self):
+        commit = self._commit_change("src/a.py", "x = 2\n")
+        result = sieve.check_ownership(self.repo_root, str(self.repo_root), commit, ["src/a.py"],
+                                        integration_branch="dag/does-not-exist")
+        self.assertFalse(result["ran"])
+        self.assertIn("dag/does-not-exist", result["reason"])
 
 
 class CheckTypesLintFallbackTests(unittest.TestCase):
@@ -156,6 +193,41 @@ class RunRegistryTests(unittest.TestCase):
                                       enabled=["ownership", "secrets", "types", "lint",
                                                "tests", "ast"])
         self.assertEqual(len(results), 6)
+
+    def test_secrets_scan_covers_full_range_via_integration_branch(self):
+        _git(self.repo_root, "branch", "dag/run-x", self.commit)  # integration branch, pre-task tip
+        # Task commit 1: introduces a secret.
+        (self.repo_root / "src" / "b.py").write_text("key = 'AKIAABCDEFGHIJKLMNOP'\n",
+                                                       encoding="utf-8")
+        _git(self.repo_root, "add", ".")
+        _git(self.repo_root, "commit", "-q", "-m", "leak a secret")
+        # Task commit 2 (final): an unrelated, harmless change.
+        (self.repo_root / "src" / "a.py").write_text("x = 3\n", encoding="utf-8")
+        _git(self.repo_root, "add", ".")
+        _git(self.repo_root, "commit", "-q", "-m", "unrelated change")
+        final_commit = _git(self.repo_root, "rev-parse", "HEAD").stdout.strip()
+
+        # Documents the blind spot the fix closes: a single-commit diff (no
+        # integration_branch) only sees the harmless final commit.
+        narrow = sieve.run_registry(repo_root=self.repo_root, worktree=str(self.repo_root),
+                                     commit=final_commit, owns=["src/a.py", "src/b.py"],
+                                     enabled=["secrets"])
+        self.assertTrue(next(r for r in narrow if r["name"] == "secrets")["passed"])
+
+        full = sieve.run_registry(repo_root=self.repo_root, worktree=str(self.repo_root),
+                                   commit=final_commit, owns=["src/a.py", "src/b.py"],
+                                   enabled=["secrets"], integration_branch="dag/run-x")
+        secrets_result = next(r for r in full if r["name"] == "secrets")
+        self.assertTrue(secrets_result["ran"])
+        self.assertFalse(secrets_result["passed"])
+
+    def test_declines_when_integration_branch_given_but_unresolvable(self):
+        results = sieve.run_registry(repo_root=self.repo_root, worktree=str(self.repo_root),
+                                      commit=self.commit, owns=["src/a.py"],
+                                      enabled=["ownership", "secrets"],
+                                      integration_branch="dag/does-not-exist")
+        for r in results:
+            self.assertFalse(r["ran"])
 
 
 class RenderDeclarationTests(unittest.TestCase):

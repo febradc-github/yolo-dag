@@ -36,7 +36,8 @@ sys.path.insert(0, str(PLUGIN_ROOT))
 try:
     from meter import config as config_mod
 except Exception as exc:
-    print(f"meter: could not load its own config module ({exc!r}); nothing to toggle.")
+    print(f"meter: could not load its own config module ({exc!r}); nothing to toggle.",
+          file=sys.stderr)
     sys.exit(0)
 
 

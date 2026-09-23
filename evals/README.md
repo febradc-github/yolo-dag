@@ -24,6 +24,12 @@ text names explicitly (`runs`, `tags`, `max_turns`, `timeout_seconds`). Expect t
 details on the first real run. Treat a green suite as unproven until someone with access has
 actually run it.
 
+Each `case.yaml` also carries a `schema_version: 1` field. This is a self-imposed pin, not
+something `claude plugin eval` itself reads — the real schema is still unverified against the
+early-access runner, per the above — so it exists only to give a human a place to notice drift:
+if the real runner's schema turns out to need a different shape, bump this field alongside the
+fix rather than silently assuming the old cases still match.
+
 **How these cases answer the pipeline's questions.** The pipeline asks via `AskUserQuestion` in up
 to three places — `brainstorm`'s opening plan-only/full-run question, the implementation boundary
 on a plan-only run, and the "how many tasks in parallel" prompt before every Phase 5 pass. An

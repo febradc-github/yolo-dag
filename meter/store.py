@@ -263,6 +263,18 @@ _MIGRATIONS = [
     "ALTER TABLE ledger ADD COLUMN call_count INTEGER",
 ]
 
+# Deliberately one process-wide lock around one shared connection, not a
+# thread-local reader pool. WAL mode (above) would let separate reader
+# connections run concurrently with a writer, but the hot-path callers that
+# would benefit (oracle.py's cache lookup, clamp.py's read-span tracking) each
+# interleave a read with a write in the same call (e.g. a cache hit immediately
+# bumps a hit counter) — splitting connections there buys concurrency on the
+# read half while still serializing on the write half moments later, for a
+# real refactor across ~9 call sites. Each hook already fails open on its own
+# deadline (meter/daemon.py), so a lock-contention delay degrades to "this
+# hook's decision arrives late or not at all," never a wrong or corrupted one.
+# Revisit if `dag-doctor`/the ledger ever shows this lock as a measured
+# bottleneck, not a theoretical one.
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 

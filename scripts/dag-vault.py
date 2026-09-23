@@ -24,7 +24,8 @@ try:
     from meter import store
     from meter import vault
 except Exception as exc:
-    print(f"meter: could not load its own vault module ({exc!r}); nothing to report.")
+    print(f"meter: could not load its own vault module ({exc!r}); nothing to report.",
+          file=sys.stderr)
     sys.exit(0)
 
 

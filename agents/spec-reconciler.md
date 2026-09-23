@@ -52,7 +52,9 @@ is right — often the repo settles it outright.
   absence of a UX copy spec on a backend refactor is correct, not a finding.
 
 Hold to the same bar as the rest of the pipeline: **confidence ≥ 80**, and only if it would
-actually change what gets built.
+actually change what gets built. **A contradiction without a specific quote from each of the two
+specialists' deliverables does not meet the bar** — "these seem to disagree" is not a finding until
+you can point at the two claims that can't both hold.
 
 ## Output format
 

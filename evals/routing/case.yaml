@@ -1,4 +1,5 @@
 name: routing
+schema_version: 1
 description: Phase 1 routing selects only the specialists whose domains the request actually touches.
 runs: 3
 tags: [cheap, phase-1]

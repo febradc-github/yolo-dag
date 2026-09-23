@@ -350,6 +350,61 @@ def check_mode_tables() -> None:
                      f"{reference.get(label)}, {rel} says {table.get(label)}")
 
 
+SPECIALIST_REVISION_FILES = [
+    "architecture-specialist", "security-specialist", "research-specialist",
+    "test-planning-specialist", "cost-estimation-specialist", "data-schema-specialist",
+    "design-specialist", "ux-copy-specialist",
+]
+
+# The clause naming what a cross-specialist contradiction looks like is the one part of
+# the shared "## Revision" section that legitimately varies per domain (ux-copy-specialist
+# names its own example instead of the generic phrasing) — normalised out before comparing.
+_REVISION_VARIABLE_CLAUSE_RE = re.compile(
+    r"found by `spec-reconciler` — .*?\. Treat it the same way", re.DOTALL,
+)
+_REVISION_NORMALIZED_CLAUSE = (
+    "found by `spec-reconciler` — <domain-specific example>. Treat it the same way"
+)
+
+
+def check_specialist_revision_protocol() -> None:
+    """The review-round/pushback protocol under '## Revision' is one mechanism the
+    orchestrator implements identically for all 8 domain specialists, restated in each
+    agent's own file — the same class of copy-pasted-and-drifted risk the mode-table
+    check exists to catch, just unguarded until now. Fails loudly, naming whichever
+    file's text diverges from the rest, rather than letting a hand-edit to one file
+    silently desync the other seven."""
+    normalized: dict[str, str] = {}
+    for stem in SPECIALIST_REVISION_FILES:
+        rel = f"agents/{stem}.md"
+        path = ROOT / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail(f"{rel}: {exc}")
+            continue
+        match = re.search(r"\n## Revision\n(.*?)\n## Output format\n", text, re.DOTALL)
+        if not match:
+            fail(f"{rel}: no `## Revision` ... `## Output format` section found to check "
+                 f"against its sibling specialists")
+            continue
+        section = _REVISION_VARIABLE_CLAUSE_RE.sub(_REVISION_NORMALIZED_CLAUSE, match.group(1))
+        # Collapse whitespace before comparing: the normalized clause is a different
+        # length than the real one it replaces, which reflows Markdown's line-wrapping
+        # without changing the actual content — that reflow must not itself read as drift.
+        normalized[rel] = " ".join(section.split())
+
+    if not normalized:
+        return
+    reference_file, reference_text = next(iter(normalized.items()))
+    for rel, text in normalized.items():
+        if text != reference_text:
+            fail(f"{rel}: `## Revision` section text has drifted from {reference_file} "
+                 f"(and presumably the other specialists) — the shared review/pushback "
+                 f"protocol is meant to read identically across all 8 domain specialists, "
+                 f"aside from the one domain-specific example clause")
+
+
 def check_flags() -> None:
     """Every flag a skill's argument-hint documents must be one the orchestrator parses."""
     try:
@@ -401,13 +456,15 @@ def check_run_json_schema() -> None:
 
 
 def check_meter_hooks() -> None:
-    """Structural checks for hooks/hooks.json, meter's M0 (Ledger) milestone.
-    Covers meter-handoff.md Section 6.6 items 1 (real hook event names), 2
-    (command-hook script paths exist), and 8 (hooks.json's port matches
-    meter/config.py's default) — the only items relevant while M0 is the only
-    milestone shipped. Items 3-5 and 7 (receipt schema, config keys named in
-    commands/README) are deferred to whichever milestone introduces receipts
-    and the rest of the config surface."""
+    """Structural checks for hooks/hooks.json, covering meter-handoff.md Section
+    6.6 items 1 (real hook event names), 2 (command-hook script paths exist), and
+    8 (hooks.json's port matches meter/config.py's default). As of this plugin's
+    current version, all of v1 (M0-M6) and v2 (M9/M13/M15/M11/M12/M14, plus M10
+    and M8 built-but-disabled-by-default) are shipped — see README.md's Meter
+    section for exact scope per milestone. Items 3-5 (receipt schema, existing
+    status-line contracts) are covered separately by check_receipts and
+    check_agents' CONTRACTS loop; item 7 (config keys named in commands/README)
+    has no dedicated check yet."""
     hooks_path = ROOT / "hooks" / "hooks.json"
     if not hooks_path.exists():
         return  # meter not present in this checkout; nothing to check
@@ -537,6 +594,7 @@ def main() -> int:
     check_commands()
     check_skills()
     check_mode_tables()
+    check_specialist_revision_protocol()
     check_flags()
     check_hint_length()
     check_run_json_schema()

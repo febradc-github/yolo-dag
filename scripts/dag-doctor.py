@@ -29,7 +29,15 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
+
+# Every individual probe below already carries its own timeout, but a probe on a
+# platform where a timeout parameter is silently ignored (or a subprocess that
+# ignores its own kill signal) would otherwise hang this command indefinitely.
+# This is a backstop, not the primary defense: force the process to exit rather
+# than hang forever, well past the sum of every probe's own timeout.
+_GLOBAL_DEADLINE_SECONDS = 45.0
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PLUGIN_ROOT))
@@ -377,6 +385,16 @@ def _summarize_probe_capture(capture_path: Path) -> None:
 
 
 def main() -> int:
+    watchdog = threading.Timer(_GLOBAL_DEADLINE_SECONDS, os._exit, args=(1,))
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        return _run_checks()
+    finally:
+        watchdog.cancel()
+
+
+def _run_checks() -> int:
     repo_root = config_mod.find_repo_root(Path.cwd())
     cfg = config_mod.load_config(repo_root)
 

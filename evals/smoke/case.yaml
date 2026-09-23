@@ -1,4 +1,5 @@
 name: smoke
+schema_version: 1
 description: End-to-end — a small real request survives all six phases and lands on an integration branch with a passing suite and a recoverable run directory. The one case that answers the pipeline's questions for real instead of pre-answering them with flags.
 runs: 1
 tags: [expensive, end-to-end, interactive]

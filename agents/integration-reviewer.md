@@ -42,6 +42,9 @@ a gap that isn't already on that list.
 
 **Confidence scoring:** rate each finding 0-100, same scale as elsewhere in this pipeline. Only
 report findings ≥ 80, and only findings that would change whether the user accepts the branch.
+**A finding without a specific file in the diff, or a command's actual output, does not meet the
+80 bar** — "this seems incomplete" is not a finding until you can point at what's missing and where
+it should be.
 
 ## What you never do
 

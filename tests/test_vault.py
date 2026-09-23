@@ -111,6 +111,15 @@ class ComputeKeyTests(unittest.TestCase):
         k2 = vault.compute_key(**self._kwargs(agent_type="task-reviewer"))
         self.assertNotEqual(k1, k2)
 
+    def test_different_model_tier_differs(self):
+        # Regression test: compute_key used to be called with
+        # model_tier=agent_type everywhere, silently collapsing this
+        # component of the key. Two tasks identical in every other way but a
+        # different model tier must not collide.
+        k1 = vault.compute_key(**self._kwargs(agent_type="spec-reviewer", model_tier="inherit"))
+        k2 = vault.compute_key(**self._kwargs(agent_type="spec-reviewer", model_tier="sonnet"))
+        self.assertNotEqual(k1, k2)
+
     def test_ids_normalized_away_collide(self):
         k1 = vault.compute_key(**self._kwargs(description="Implement T-003"))
         k2 = vault.compute_key(**self._kwargs(description="Implement T-099"))
@@ -191,6 +200,31 @@ class ProcessCompletedReceiptTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "seeded")
         totals = store.get_vault_totals(self.conn)
         self.assertEqual(totals["entries"], 1)
+
+    def test_model_tier_defaults_to_agent_type_when_omitted(self):
+        commit = self._commit_change("x = 2\n")
+        vault.process_completed_receipt(
+            self.conn, self.plugin_data_dir, repo_root=self.repo_root, run_dir=self.run_dir,
+            run_id="run-1", node_id="T-001", agent_type="task-worker",
+            receipt=self._receipt(commit),
+        )
+        rows = self.conn.execute("SELECT model_tier FROM entries").fetchall()
+        self.assertEqual(rows[0][0], "task-worker")
+
+    def test_explicit_model_tier_is_used_over_agent_type(self):
+        commit = self._commit_change("x = 2\n")
+        vault.process_completed_receipt(
+            self.conn, self.plugin_data_dir, repo_root=self.repo_root, run_dir=self.run_dir,
+            run_id="run-1", node_id="T-001", agent_type="spec-reviewer", model_tier="sonnet",
+            receipt=self._receipt(commit),
+        )
+        totals = store.get_vault_totals(self.conn)
+        self.assertEqual(totals["entries"], 1)
+        # The entry must be keyed distinctly from the same task at a
+        # different (or default) tier — proven via ComputeKeyTests above;
+        # here we just confirm the recorded model_tier column reflects it.
+        rows = self.conn.execute("SELECT model_tier FROM entries").fetchall()
+        self.assertEqual(rows[0][0], "sonnet")
 
     def test_non_done_status_is_skipped(self):
         commit = self._commit_change("x = 2\n")

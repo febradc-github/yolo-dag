@@ -484,7 +484,13 @@ actually pass the merged spec into "every agent" the way the spec assumes — Ph
 one spawn that does receive the full spec, once per run, is `task-specialist` in Phase 4 — so
 that's where Distill is wired in, and its practical payoff here is narrower than the spec's own
 framing (cross-run/cross-repo reuse of an identical spec, not "every agent in the run" — there's
-only one full-spec consumer per run in this codebase).
+only one full-spec consumer per run in this codebase). Distill is skipped entirely in `micro`
+mode — there `merged-spec.md` already holds nothing beyond the raw request, and compiling a brief
+from a spec that's already one sentence would add pure round-trip overhead to the exact class of
+run `micro` exists to keep cheap. In `full`/`lite`, Distill's compile-verify(-revise-reverify)
+sequence is fully serial and foreground by construction (each step gates the next), which is a
+deliberate correctness-over-latency trade documented alongside its Phase 4 usage in
+`skills/orchestrator/SKILL.md`, not an oversight.
 
 **R3's measurement half, M14 Attribution, is also done** (M14 ships and measures alone before M10
 Pull is even considered, per the spec's own release plan — see below). It records, for each node,

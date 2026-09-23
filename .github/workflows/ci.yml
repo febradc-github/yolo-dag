@@ -8,19 +8,27 @@ on:
 
 jobs:
   validate:
-    name: Validate plugin structure
+    name: Validate plugin structure (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.11 is the documented floor (meter-handoff.md 5.3); 3.12 is what's actually
+        # developed against. Both run so a floor violation doesn't slip in unnoticed.
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "${{ matrix.python-version }}"
 
-      # No dependencies by design — the validator runs on a bare interpreter so this
-      # job stays fast and can't break on a transitive package update.
+      # No dependencies by design — the validator and the test suite both run on a bare
+      # interpreter so this job stays fast and can't break on a transitive package update.
       - name: Validate manifests, agents, commands, and skills
         run: python3 scripts/validate.py
+
+      - name: Run meter's unit test suite
+        run: python3 -m unittest discover -s tests -v
 
       - name: Check JSON files parse
         run: |

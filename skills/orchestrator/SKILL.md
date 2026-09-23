@@ -286,7 +286,14 @@ Select from the eight:
   big enough time commitment to change whether it's worth doing.
 
 If the user passed `--all`, select all eight and skip the judgment. In `lite` mode, cap the
-selection at 4 — keep the always-on three plus the single most relevant optional one.
+selection at 4 — keep the always-on three plus the single most relevant optional one. **When more
+than one optional domain is deterministically triggered by its own hard rule above** (e.g. a
+request that touches both auth and persistence triggers both `security-specialist` and
+`data-schema-specialist`), don't guess which is "most relevant" — break the tie by a fixed risk
+order: `security-specialist` > `data-schema-specialist` > `cost-estimation-specialist` >
+`design-specialist` > `ux-copy-specialist`. Name every optional domain the tie-break dropped as an
+explicit stated omission in `routing.md` ("also touches cost-estimation, dropped by the lite-mode
+cap in favor of security") — never let it disappear silently.
 
 State the selection and the skips in one line ("Routing to 5: architecture, research,
 test-planning, data-schema, security — skipping design/ux-copy (no user-facing surface) and cost
@@ -324,12 +331,20 @@ wait for all of them — they can be at different rounds simultaneously):
 2. Each reviewer ends its final message with a short confirmation of what it wrote, then
    `REVIEW: CLEAN` or `REVIEW: FINDINGS <n>`. **Read that line, not a tool call** — reviewers do
    not call `ReportFindings` (they review prose, which has no file or line to anchor to). If all 3
-   report `REVIEW: CLEAN`, the round closes early and this specialist is done; skip to step 5.
+   report `REVIEW: CLEAN`, the round closes early and this specialist is done; skip to step 5. **If
+   a reviewer's final message has no parseable `REVIEW:` line at all, treat it as
+   `REVIEW: FINDINGS 1`** — a reviewer that returned no verdict is not evidence the deliverable is
+   clean. Note the gap (in `run.json`'s `degradations` or your own running notes) so it stays
+   visible, and carry it into consolidation as one generic finding requiring the specialist's
+   attention rather than silently treating the round as clean.
 3. Otherwise spawn 1 `spec-consolidator`, `run_in_background: true`, with the paths to the 3
    finding files (it `Read`s them itself) and the path it must `Write` its consolidated list to:
    `<run-dir>/specialists/<name>/round-<r>-consolidated.md`. It ends with a short confirmation and
    `CONSOLIDATED: <n>`. If the count is `0`, the round closes — deduplication can dissolve three
-   near-findings into nothing, and an empty list is not worth a revision round.
+   near-findings into nothing, and an empty list is not worth a revision round. **If
+   `spec-consolidator` returns no parseable `CONSOLIDATED:` line, treat it as `CONSOLIDATED: 1`**
+   rather than closing the round early — a missing count is not evidence of an empty list — note
+   the gap the same way, and resume the specialist with whatever raw finding text you do have.
 4. `SendMessage` the specialist **by its Phase 1 spawn name** — never a fresh spawn — pointing it
    at the consolidated-findings path (it `Read`s that itself) and the path for its revised
    deliverable, `<run-dir>/specialists/<name>/round-<r>.md`, asking it to accept valid findings,
@@ -366,6 +381,10 @@ Once every specialist has finished its Phase 2 loop:
    and mutually incompatible. This is the pass that does.
 
    It ends with a short confirmation, then `RECONCILE: CLEAN` or `RECONCILE: CONTRADICTIONS <n>`.
+   **If it returns no parseable `RECONCILE:` line, treat it as `RECONCILE: CONTRADICTIONS 1`**
+   rather than `CLEAN` — a missing verdict is not evidence the specs agree. Note the gap, and since
+   there is no actual contradiction text to route back to two named specialists, carry it forward
+   as an Open Concern instead of trying to resolve an unspecified one.
 
 3. **Resolve contradictions.** For each one, `SendMessage` it to **both** named specialists (they
    are still resumable from Phase 1), pointing at the same `round-<n>.md` path each already owns,
@@ -390,7 +409,25 @@ Once every specialist has finished its Phase 2 loop:
 
 ## Phase 4 — Decompose into a task DAG
 
-**Distill first (inert if the `meter` subsystem isn't installed).** Every `dag-distill.py`
+**Distill first (inert if the `meter` subsystem isn't installed) — skip it entirely in `micro`
+mode.** `micro`'s own definition is "no specialists, no spec review — the request is the spec": by
+the time Phase 4 starts, `merged-spec.md` already holds nothing more than the raw one-sentence
+request, copied verbatim by Phase 1's micro shortcut. There is nothing there to compress, and
+running Distill anyway would spend 2-4 extra foreground spawns (compile, verify, and on a miss a
+revise-and-re-verify round) on exactly the class of run `micro` exists to keep cheap. In `micro`
+mode, skip straight to spawning `task-specialist` below with `merged-spec.md` as its input, exactly
+as in `full`/`lite` when Distill isn't used. Everything below this paragraph applies to `full` and
+`lite` only.
+
+**A note on latency, in the same spirit as the budget-degradation disclosure below.** In `full` and
+`lite` mode, Distill's own critical path — compile, verify, and on a miss a revise-and-re-verify
+round — is fully serial and runs in the foreground, because each step's output gates the next. In
+the worst case (a missed fidelity gate) that is four round-trips stacked before `task-specialist`
+even starts, which is itself foreground and blocking. This is a deliberate correctness-over-latency
+trade, not an oversight: the fidelity gate exists specifically so a compressed brief is never used
+uncompressed-and-unverified, and that guarantee costs the round-trips it costs.
+
+Every `dag-distill.py`
 reference below means: locate it the same way `/dag-meter` does (`${CLAUDE_PLUGIN_ROOT}/scripts/
 dag-distill.py`, falling back to searching `~/.claude/plugins` for a `yolo-dag` checkout, falling
 back to `scripts/dag-distill.py` relative to the current directory) and run it with `python3` —
@@ -624,6 +661,11 @@ the whole DAG landing at once. It happens in both run types, plan-only and full 
       task reopens as a fresh worker off the branch's current tip (which contains its own earlier
       work); a merged-then-revised task is not exempt because it already passed once — it passed
       against a contract that no longer exists.
+    - **This reopen does not draw against the task's ordinary rework budget** (the 2-rework/
+      3-review cap from step 9) — it is a separate, independently bounded loop, capped instead by
+      the one-revision-per-contract rule below. A task can in the worst case see both its full
+      normal rework budget *and* one contract-triggered reopen in the same run without either
+      budget starving the other.
     - Reviewers verify against the **current** contract, never the version a task was written
       against. Pass the current text in every reviewer prompt.
     - Reopened tasks join the current pass and it does not close until they are done.

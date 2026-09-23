@@ -1,0 +1,7 @@
+# Not a packaging manifest — this project ships no third-party dependencies and is
+# never `pip install`ed (meter-handoff.md 5.3). This file exists solely so `pytest
+# tests/` works out of the box for a contributor who happens to have pytest on their
+# machine; `python3 -m unittest discover -s tests -v` remains the canonical, dependency-
+# free way to run the suite and is what CI actually uses (.github/workflows/ci.yml).
+[tool.pytest.ini_options]
+testpaths = ["tests"]

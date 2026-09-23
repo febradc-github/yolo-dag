@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # yolo-dag statusline — project-scoped, see .claude/settings.json.
 #
+# This is the only file that renders the statusline. scripts/dag-statusline.py is a
+# separate, non-overlapping concern: it toggles the `statusLine` key in a project's
+# .claude/settings.json on/off and, for a repo that has none yet, bootstraps one by
+# copying this exact file as a template — it never reimplements any rendering logic
+# itself. Edit rendering only here; that script has nothing to keep in sync.
+#
 # Prints, left to right: model | meter:on/off | git branch[*dirty] |
 # session:[bar] pct% (5-hour rate-limit window) | context:<pie glyph> pct%.
 #

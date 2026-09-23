@@ -123,6 +123,7 @@ def parse_transcript_usage(transcript_path: str) -> dict[str, Any]:
 
     in_tok = out_tok = cache_read = cache_write = 0
     saw_usage = False
+    model: str | None = None
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -141,16 +142,17 @@ def parse_transcript_usage(transcript_path: str) -> dict[str, Any]:
                 out_tok += int(usage.get("output_tokens") or 0)
                 cache_read += int(usage.get("cache_read_input_tokens") or 0)
                 cache_write += int(usage.get("cache_creation_input_tokens") or 0)
+                model = _find_model(entry) or model
     except OSError as exc:
         return {"in_tok": None, "out_tok": None, "cache_read": None, "cache_write": None,
-                "reason": f"read_error: {exc}"}
+                "model": None, "reason": f"read_error: {exc}"}
 
     if not saw_usage:
         return {"in_tok": None, "out_tok": None, "cache_read": None, "cache_write": None,
-                "reason": "no_usage_block_found"}
+                "model": None, "reason": "no_usage_block_found"}
 
     return {"in_tok": in_tok, "out_tok": out_tok, "cache_read": cache_read,
-            "cache_write": cache_write, "reason": None}
+            "cache_write": cache_write, "model": model, "reason": None}
 
 
 def _find_usage_block(entry: dict) -> dict | None:
@@ -170,6 +172,33 @@ def _find_usage_block(entry: dict) -> dict | None:
     return None
 
 
+def _find_model(entry: dict) -> str | None:
+    """The raw model identifier can plausibly live alongside usage at the same
+    depths `_find_usage_block` checks — same reasoning, same VERIFY caveat."""
+    message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+    for candidate in (entry.get("model"), message.get("model")):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def tier_from_model(model: str | None) -> str:
+    """Buckets a raw model identifier (e.g. `claude-haiku-4-5-20251001`) into
+    meter's coarse tier vocabulary (`inherit`/`sonnet`/`haiku` — the weights
+    `_MODEL_WEIGHTS` and Vault's key formula use), substring-matched
+    case-insensitively since exact model ids change across releases.
+    Anything unrecognised, including `None`, normalises to `inherit` — the
+    same default `_MODEL_WEIGHTS.get(..., 1.0)` already assumed."""
+    if not model:
+        return "inherit"
+    lowered = model.lower()
+    if "haiku" in lowered:
+        return "haiku"
+    if "sonnet" in lowered:
+        return "sonnet"
+    return "inherit"
+
+
 def record_subagent_start(conn: sqlite3.Connection, *, run_id: str | None, node_id: str | None,
                            agent_id: str, agent_type: str, started_at: int) -> None:
     store.upsert_ledger_row(conn, {
@@ -178,7 +207,7 @@ def record_subagent_start(conn: sqlite3.Connection, *, run_id: str | None, node_
         "agent_id": agent_id,
         "agent_type": agent_type,
         "phase": phase_of(node_id) if node_id else None,
-        "model": None,
+        "model": None,  # not known until the transcript exists at SubagentStop
         "in_tok": None, "out_tok": None, "cache_read": None, "cache_write": None,
         "wall_ms": None,
         "source": "live",
@@ -194,7 +223,7 @@ def record_subagent_stop(conn: sqlite3.Connection, *, run_id: str | None, node_i
     run_id = run_id or "_unattributed"
     usage = (parse_transcript_usage(transcript_path) if transcript_path
              else {"in_tok": None, "out_tok": None, "cache_read": None, "cache_write": None,
-                   "reason": "no_transcript_path_in_payload"})
+                   "model": None, "reason": "no_transcript_path_in_payload"})
 
     wall_ms = None
     if started_at is not None:
@@ -211,7 +240,7 @@ def record_subagent_stop(conn: sqlite3.Connection, *, run_id: str | None, node_i
         "agent_id": agent_id,
         "agent_type": agent_type,
         "phase": phase_of(node_id) if node_id else None,
-        "model": None,
+        "model": usage.get("model"),  # raw identifier; bucket with tier_from_model() at point of use
         "in_tok": usage["in_tok"], "out_tok": usage["out_tok"],
         "cache_read": usage["cache_read"], "cache_write": usage["cache_write"],
         "wall_ms": wall_ms,

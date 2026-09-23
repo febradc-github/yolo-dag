@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """CLI for turning this project directory's statusline on/off, or checking its state.
 
+This script owns none of the rendering logic and never duplicates it: `on` copies
+`.claude/statusline.sh` byte-for-byte as a template into the target repo, and every
+other command only edits `.claude/settings.json`'s `statusLine` key. All rendering
+lives in exactly one place, `.claude/statusline.sh` — edit it there, not here.
+
 Usage: python3 scripts/dag-statusline.py <on|off|status>
 
 Claude Code's statusline is configured via the `statusLine` key in

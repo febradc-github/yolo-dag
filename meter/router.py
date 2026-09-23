@@ -264,7 +264,7 @@ def _process_subagent_stop(payload: dict, ctx: Context, *, receipt_outcome=None)
     node_id = existing["node"] if existing else None
     started_at = existing["started_at"] if existing else None
 
-    ledger.record_subagent_stop(
+    ledger_row = ledger.record_subagent_stop(
         ctx.conn, run_id=run_id, node_id=node_id, agent_id=agent_id,
         agent_type=agent_type, transcript_path=transcript_path,
         started_at=started_at, ended_at=int(time.time()),
@@ -295,6 +295,7 @@ def _process_subagent_stop(payload: dict, ctx: Context, *, receipt_outcome=None)
                         vault.process_completed_receipt(
                             ctx.conn, ctx.plugin_data_dir, repo_root=repo_root, run_dir=run_dir,
                             run_id=run_id, node_id=node_id, agent_type=agent_type,
+                            model_tier=ledger.tier_from_model(ledger_row.get("model")),
                             receipt=receipt_outcome.receipt,
                         )
                     except Exception:
@@ -463,7 +464,8 @@ def _maybe_run_sieve(payload: dict, ctx: Context, *, run_id: str, node_id: str, 
 
     try:
         results = sieve.run_registry(repo_root=repo_root, worktree=worktree, commit=commit,
-                                      owns=owns, enabled=list(sieve_cfg.get("checkers") or []))
+                                      owns=owns, enabled=list(sieve_cfg.get("checkers") or []),
+                                      integration_branch=f"dag/{run_id}")
     except Exception:
         ctx.record_error()
         return None
@@ -920,15 +922,55 @@ def handle_tool_pre_throttle(payload: dict, ctx: Context) -> dict:
                                     "permissionDecisionReason": decision["reason"]}}
 
 
-def _git_is_tracked(repo_root: Path, rel_path: str) -> bool:
+_TRACKED_CACHE: dict[Path, tuple[float, set[str]]] = {}
+_TRACKED_CACHE_LOCK = threading.Lock()
+
+
+def _git_index_mtime(repo_root: Path) -> float | None:
+    try:
+        return (repo_root / ".git" / "index").stat().st_mtime
+    except OSError:
+        return None
+
+
+def _git_tracked_set(repo_root: Path) -> set[str] | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", rel_path],
+            ["git", "-C", str(repo_root), "ls-files"],
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _git_is_tracked(repo_root: Path, rel_path: str) -> bool:
+    """Cached per `repo_root`, invalidated by `.git/index`'s mtime (bumped by
+    every `git add`/`commit`/`rm`) — avoids a `git ls-files --error-unmatch`
+    subprocess spawn on every single `Write` call via Throttle's `PreToolUse`
+    handler, which risked the daemon's own 50ms soft-deadline design across a
+    hundred-agent run. Any failure to read the index or list files falls
+    through to the same fail-safe direction this always had: report `False`
+    ("not tracked"), which only ever widens Throttle's new-file exception —
+    it never wrongly denies a write, and a caching bug can't change that."""
+    mtime = _git_index_mtime(repo_root)
+    if mtime is not None:
+        with _TRACKED_CACHE_LOCK:
+            cached = _TRACKED_CACHE.get(repo_root)
+            if cached is not None and cached[0] == mtime:
+                return rel_path in cached[1]
+
+    tracked = _git_tracked_set(repo_root)
+    if tracked is None:
         return False
-    return result.returncode == 0
+
+    if mtime is not None:
+        with _TRACKED_CACHE_LOCK:
+            _TRACKED_CACHE[repo_root] = (mtime, tracked)
+
+    return rel_path in tracked
 
 
 ROUTES: dict[str, Handler] = {

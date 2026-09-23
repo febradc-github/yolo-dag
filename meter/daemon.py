@@ -100,12 +100,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_payload(self) -> dict:
         length = int(self.headers.get("Content-Length", 0) or 0)
-        if length <= 0 or length > _MAX_BODY_BYTES:
+        if length <= 0:
+            return {}  # legitimate: no body at all — not worth a log line
+        if length > _MAX_BODY_BYTES:
+            _log(self.plugin_data_dir, f"payload: rejected oversized body ({length} bytes > "
+                                        f"{_MAX_BODY_BYTES}) on {self.path}")
             return {}
         raw = self.rfile.read(length)
         try:
             return json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            _log(self.plugin_data_dir, f"payload: malformed body on {self.path} ({exc})")
             return {}
 
     def _authenticated(self) -> bool:

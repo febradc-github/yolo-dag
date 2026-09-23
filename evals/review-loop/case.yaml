@@ -1,4 +1,5 @@
 name: review-loop
+schema_version: 1
 description: Phase 2 reviewers find a planted flaw, emit the REVIEW status-line contract, and the specialist actually revises rather than deflecting.
 runs: 3
 tags: [medium, phase-2]

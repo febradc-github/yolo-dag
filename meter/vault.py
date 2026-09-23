@@ -57,6 +57,7 @@ from typing import Any
 
 from . import config as config_mod
 from . import dossier as dossier_mod
+from . import gitutil
 from . import store
 
 VAULT_SCHEMA_VERSION = 1
@@ -164,16 +165,31 @@ def _input_span_hashes(conn: sqlite3.Connection, repo_root: Path, run_id: str, n
     return hashes
 
 
-def _git_show_patch(worktree: str, commit: str) -> str | None:
-    """`git show <commit>` — the diff introduced by that one commit, not a
-    range. This is an approximation: a worker that made several commits for
-    one task will only have its LAST commit captured here. task-worker's
-    trailer only ever names one final COMMIT sha with no base sha recorded
-    alongside it, so there is currently no reliable range to diff instead.
-    The effect is bounded to shadow-mode measurement quality (an
-    under-captured patch can only make a genuine match register as a
-    disagreement, never the reverse) — it does not affect anything that
-    changes pipeline behaviour, since shadow mode never applies a patch."""
+def _git_show_patch(worktree: str, commit: str, integration_branch: str | None = None) -> str | None:
+    """Prefers the task's full commit range via `gitutil.resolve_diff_range`
+    (merge-base against the run's integration branch). Falls back to
+    `git show <commit>` — the diff introduced by that one commit only — when
+    the range can't be established (no `integration_branch`, or its
+    merge-base doesn't resolve). The fallback's effect is bounded to
+    shadow-mode measurement quality (an under-captured patch can only make a
+    genuine match register as a disagreement, never the reverse) — it does
+    not affect anything that changes pipeline behaviour, since shadow mode
+    never applies a patch."""
+    diff_range = gitutil.resolve_diff_range(worktree=worktree, commit=commit,
+                                             integration_branch=integration_branch)
+    if diff_range is not None:
+        base, head = diff_range
+        try:
+            result = subprocess.run(
+                ["git", "-C", worktree, "diff", base, head],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            result = None
+        if result is not None and result.returncode == 0 and result.stdout.strip():
+            return result.stdout
+        # range resolved but produced nothing usable — fall through below
+
     try:
         result = subprocess.run(
             ["git", "-C", worktree, "show", "--format=", commit],
@@ -186,21 +202,29 @@ def _git_show_patch(worktree: str, commit: str) -> str | None:
 
 def process_completed_receipt(conn: sqlite3.Connection, plugin_data_dir: Path, *,
                                repo_root: Path, run_dir: Path, run_id: str, node_id: str,
-                               agent_type: str, receipt: dict) -> dict[str, Any] | None:
+                               agent_type: str, receipt: dict,
+                               model_tier: str | None = None) -> dict[str, Any] | None:
     """The shadow-mode entry point, called once per successfully-completed
     node with a schema-valid receipt (see meter/router.py). Never raises,
     never blocks, never applies anything — see the module docstring. Returns
     a summary dict for logging, or None when there was nothing to check
-    (no task record, no worktree/commit, receipt not `done`)."""
+    (no task record, no worktree/commit, receipt not `done`).
+
+    `model_tier` should be the node's actual model tier (e.g. from
+    `ledger.tier_from_model`), distinct from `agent_type` — see the key
+    formula's module docstring. Omitting it falls back to `agent_type`, the
+    same value the key used before this distinction existed."""
     try:
         return _process(conn, plugin_data_dir, repo_root=repo_root, run_dir=run_dir,
-                         run_id=run_id, node_id=node_id, agent_type=agent_type, receipt=receipt)
+                         run_id=run_id, node_id=node_id, agent_type=agent_type, receipt=receipt,
+                         model_tier=model_tier)
     except Exception:
         return None
 
 
 def _process(conn: sqlite3.Connection, plugin_data_dir: Path, *, repo_root: Path, run_dir: Path,
-             run_id: str, node_id: str, agent_type: str, receipt: dict) -> dict[str, Any] | None:
+             run_id: str, node_id: str, agent_type: str, receipt: dict,
+             model_tier: str | None = None) -> dict[str, Any] | None:
     if receipt.get("status") != "done":
         return None
     worktree = receipt.get("worktree")
@@ -220,11 +244,14 @@ def _process(conn: sqlite3.Connection, plugin_data_dir: Path, *, repo_root: Path
     span_hashes = _input_span_hashes(conn, repo_root, run_id, node_id, task)
     plugin_version = _plugin_version(repo_root)
 
+    resolved_model_tier = model_tier or agent_type
+
     key = compute_key(description=description, acceptance_criteria=ac_list,
                        contract_text=contract_text, input_span_hashes=span_hashes,
-                       model_tier=agent_type, agent_type=agent_type, plugin_version=plugin_version)
+                       model_tier=resolved_model_tier, agent_type=agent_type,
+                       plugin_version=plugin_version)
 
-    patch_text = _git_show_patch(worktree, commit)
+    patch_text = _git_show_patch(worktree, commit, integration_branch=f"dag/{run_id}")
     if patch_text is None:
         return None
 
@@ -234,7 +261,7 @@ def _process(conn: sqlite3.Connection, plugin_data_dir: Path, *, repo_root: Path
         verification = receipt.get("verification") or {}
         store.insert_vault_entry(conn, {
             "key": key, "repo": config_mod.repo_fingerprint(repo_root), "agent_type": agent_type,
-            "model_tier": agent_type, "patch_sha": patch_sha, "receipt_json": json.dumps(receipt),
+            "model_tier": resolved_model_tier, "patch_sha": patch_sha, "receipt_json": json.dumps(receipt),
             "verify_cmd": verification.get("cmd"), "verify_digest": verification.get("digest"),
             "tokens_spent": None, "created_at": int(time.time()),
             "schema_v": VAULT_SCHEMA_VERSION,

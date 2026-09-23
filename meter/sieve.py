@@ -45,6 +45,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from . import gitutil
+
 _SECRET_PATTERNS = [
     (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS access key"),
     (re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"), "private key"),
@@ -62,17 +64,39 @@ def _result(name: str, *, ran: bool, passed: bool = False, findings: list[str] |
     return {"name": name, "ran": ran, "passed": passed, "findings": findings or [], "reason": reason}
 
 
-def check_ownership(repo_root: Path, worktree: str, commit: str, owns: list[str]) -> dict[str, Any]:
+def check_ownership(repo_root: Path, worktree: str, commit: str, owns: list[str],
+                     integration_branch: str | None = None) -> dict[str, Any]:
+    """`integration_branch` (the run's `dag/<run-id>` branch) lets this diff
+    the task's FULL range via `gitutil.resolve_diff_range` instead of only its
+    last commit — a worker that made several commits is otherwise only
+    checked on the last one, letting a real ownership violation in an earlier
+    commit through undetected while this checker still declares the whole
+    task covered. When `integration_branch` is given but its merge-base can't
+    be resolved, this declines (`ran=False`) rather than silently narrowing
+    back to a single commit and overclaiming coverage — the module's one
+    invariant. Omitting `integration_branch` entirely preserves the original
+    single-commit-diff behaviour, for callers with no run/branch context."""
+    diff_range = gitutil.resolve_diff_range(worktree=worktree, commit=commit,
+                                             integration_branch=integration_branch)
+    if diff_range is not None:
+        base, head = diff_range
+    elif integration_branch:
+        return _result("ownership", ran=False,
+                        reason=f"could not establish the task's full commit range against "
+                               f"{integration_branch} — multi-commit coverage unverified")
+    else:
+        base, head = f"{commit}~1", commit  # legacy single-commit range: no branch context given
+
     try:
         result = subprocess.run(
-            ["git", "-C", worktree, "diff", "--name-only", f"{commit}~1", commit],
+            ["git", "-C", worktree, "diff", "--name-only", base, head],
             capture_output=True, text=True, timeout=_CHECKER_TIMEOUT_S, check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return _result("ownership", ran=False, reason=f"git diff failed: {exc}")
     if result.returncode != 0:
         return _result("ownership", ran=False, reason="git diff --name-only exited non-zero "
-                                                        "(single-commit range unavailable)")
+                                                        "(commit range unavailable)")
 
     changed = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     owns_set = set(owns)
@@ -81,7 +105,14 @@ def check_ownership(repo_root: Path, worktree: str, commit: str, owns: list[str]
                     findings=[f"touched file outside owns: {f}" for f in outside])
 
 
-def check_secrets(diff_text: str) -> dict[str, Any]:
+def check_secrets(diff_text: str, diff_available: bool = True) -> dict[str, Any]:
+    """`diff_available=False` means the diff this scan would run against
+    could not actually be obtained (a plumbing failure, not "no changes") —
+    reporting `passed=True` against an empty string in that case would
+    silently declare a scan that never happened. Defaults to `True` so direct
+    callers passing real diff text keep their existing behaviour."""
+    if not diff_available:
+        return _result("secrets", ran=False, reason="could not obtain the task's diff to scan")
     if not diff_text:
         return _result("secrets", ran=True, passed=True)
     findings = []
@@ -154,24 +185,43 @@ def _which(name: str) -> bool:
 
 
 def run_registry(*, repo_root: Path, worktree: str, commit: str, owns: list[str],
-                  enabled: list[str]) -> list[dict[str, Any]]:
+                  enabled: list[str], integration_branch: str | None = None) -> list[dict[str, Any]]:
     """Runs every checker named in `enabled` (meter.modules.sieve.checkers)
     and returns their results, in a fixed order. Never raises: an unexpected
     exception in one checker is folded into that checker's own `not run`
-    result rather than aborting the rest of the registry."""
+    result rather than aborting the rest of the registry.
+
+    `integration_branch` (see `check_ownership`) also governs the range used
+    to build `diff_text` for `secrets`: a diff spanning only the last commit
+    would let a credential committed earlier in the task through unscanned
+    while still declaring the class covered."""
     diff_text = ""
-    try:
-        diff_result = subprocess.run(
-            ["git", "-C", worktree, "diff", f"{commit}~1", commit],
-            capture_output=True, text=True, timeout=_CHECKER_TIMEOUT_S, check=False,
-        )
-        diff_text = diff_result.stdout
-    except (OSError, subprocess.SubprocessError):
-        pass
+    diff_available = False
+    diff_range = gitutil.resolve_diff_range(worktree=worktree, commit=commit,
+                                             integration_branch=integration_branch)
+    if diff_range is not None:
+        base, head = diff_range
+    elif integration_branch:
+        base = head = None  # full range requested but unresolvable — decline, don't narrow
+    else:
+        base, head = f"{commit}~1", commit  # legacy single-commit range: no branch context given
+
+    if base is not None:
+        try:
+            diff_result = subprocess.run(
+                ["git", "-C", worktree, "diff", base, head],
+                capture_output=True, text=True, timeout=_CHECKER_TIMEOUT_S, check=False,
+            )
+            if diff_result.returncode == 0:
+                diff_text = diff_result.stdout
+                diff_available = True
+        except (OSError, subprocess.SubprocessError):
+            pass
 
     dispatch = {
-        "ownership": lambda: check_ownership(repo_root, worktree, commit, owns),
-        "secrets": lambda: check_secrets(diff_text),
+        "ownership": lambda: check_ownership(repo_root, worktree, commit, owns,
+                                              integration_branch=integration_branch),
+        "secrets": lambda: check_secrets(diff_text, diff_available=diff_available),
         "types": lambda: check_types(worktree),
         "lint": lambda: check_lint(worktree),
         "tests": check_tests,

@@ -1,4 +1,5 @@
 name: budget-degradation
+schema_version: 1
 description: A run resumed with its spawn ledger nearly at the ceiling must degrade in the stated order — rounds, then specialists, then concurrency — say so, and record it, rather than silently overspending or stopping.
 runs: 2
 tags: [medium, budget, negative]

@@ -1,4 +1,5 @@
 name: resume
+schema_version: 1
 description: A run killed mid-Phase-5 resumes without redoing completed phases or re-executing merged tasks, and the remaining task builds on the merged code already on the branch.
 runs: 2
 tags: [medium, resume]
