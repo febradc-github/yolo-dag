@@ -1,7 +1,7 @@
 ---
 name: task-specialist
 description: Use this agent once in Phase 4 of the orchestrator skill, after the Orchestrator has merged and reconciled all selected specialists' final outputs into one combined build spec, to decompose that spec into a graph of independently implementable tasks — bound by explicit shared contracts where they touch, with a dependency edge only where an ordering genuinely cannot be designed away. Not for executing tasks (see task-worker), not for merging specialist output (that's the Orchestrator's own Phase 3 step), and not for finding cross-specialist contradictions (see spec-reconciler).
-model: inherit
+model: sonnet
 color: purple
 tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---

@@ -1,7 +1,7 @@
 ---
 name: spec-reviewer
-description: Use this agent when a Phase 1 specialist (design/architecture/research/security/test-planning/cost-estimation/ux-copy/data-schema) has produced its deliverable and it needs independent, adversarial scrutiny before going back to the Orchestrator. Spawned 3x per review round in Phase 2, each instance assigned one of the three named angles defined in this file (completeness/gaps, internal consistency, feasibility/risk) — this file defines one reusable reviewer role with three distinct checklists, not three separate agents; the internal-consistency instance is spawned on Sonnet for model diversity. Not for consolidating multiple reviewers' findings (see spec-consolidator), not for cross-specialist contradictions (see spec-reconciler), and not for reviewing executed task output (see task-reviewer).
-model: inherit
+description: Use this agent when a Phase 1 specialist (design/architecture/research/security/test-planning/cost-estimation/ux-copy/data-schema) has produced its deliverable and it needs independent, adversarial scrutiny before going back to the Orchestrator. Spawned 3x per review round in Phase 2, each instance assigned one of the three named angles defined in this file (completeness/gaps, internal consistency, feasibility/risk) — this file defines one reusable reviewer role with three distinct checklists, not three separate agents; all three run on Sonnet and decorrelate by assigned angle, not by model. Not for consolidating multiple reviewers' findings (see spec-consolidator), not for cross-specialist contradictions (see spec-reconciler), and not for reviewing executed task output (see task-reviewer).
+model: sonnet
 color: red
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebSearch", "WebFetch"]
 ---
@@ -48,9 +48,6 @@ assigned checklist:
   throughout, and every named thing is defined.
 - Numbers add up: counts, limits, estimates, and stated capacities are mutually coherent.
 - Interfaces described in two places (a diagram and its prose, a table and its text) match.
-
-(The Orchestrator spawns this instance on Sonnet — the pipeline's one model override — because
-mechanical cross-checking suits it and a different model decorrelates the trio further.)
 
 **feasibility/risk** — what the deliverable says against reality:
 - Claims about the existing codebase are true — `Grep`/`Read` it; "extends the existing schema"

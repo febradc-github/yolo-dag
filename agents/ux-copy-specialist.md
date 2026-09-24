@@ -1,7 +1,7 @@
 ---
 name: ux-copy-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a UX writing / microcopy pass on a gap-closed request — tone, wording, and copy for the user-facing surfaces the request implies. Selected by routing only when the request actually has user-facing surfaces. Spawned at most once per run, in parallel with the other selected specialists. Not for layout/interaction structure (see design-specialist).
-model: inherit
+model: sonnet
 color: magenta
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebFetch", "Artifact"]
 ---

@@ -1,7 +1,7 @@
 ---
 name: cost-estimation-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a cost/resource estimation pass on a gap-closed request — infra cost, API/token spend, engineering time. Selected by routing whenever the request implies infrastructure, per-call spend, or a material time commitment. Spawned at most once per run, in parallel with the other selected specialists. Not for scope/task breakdown (see task-specialist).
-model: inherit
+model: sonnet
 color: yellow
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebFetch", "WebSearch"]
 ---

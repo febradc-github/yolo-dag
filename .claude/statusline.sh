@@ -8,7 +8,8 @@
 # itself. Edit rendering only here; that script has nothing to keep in sync.
 #
 # Prints, left to right: model | meter:on/off | git branch[*dirty] |
-# session:[bar] pct% (5-hour rate-limit window) | context:<pie glyph> pct%.
+# weekly:[bar] pct% (7-day rate-limit window) | session:[bar] pct% (5-hour rate-limit window) |
+# context:<pie glyph> pct%.
 #
 # A "count of running background agents" segment was requested earlier but is
 # intentionally NOT implemented: the documented Claude Code statusline JSON
@@ -124,7 +125,65 @@ if [ -n "$repo_root" ] && command -v git >/dev/null 2>&1; then
     fi
 fi
 
-# --- 4. current session usage, as a bar (5-hour rate-limit window) ---
+# --- 4. weekly usage, as a bar (7-day rate-limit window). Same account-wide-not-
+# present-until-first-response gap as the session bar below, and the same fix:
+# cache the last live reading alongside its own `resets_at` and fall back to it
+# only while that window hasn't passed — see the session segment's comment for
+# the full rationale, which applies here unchanged. Own cache file so a stale
+# weekly reading never leaks into the session bar or vice versa. ---
+weekly_cache_dir="$HOME/.cache/yolo-dag-statusline"
+weekly_cache_file="$weekly_cache_dir/weekly_rate_limit"
+
+weekly_pct="$(jget '.rate_limits.seven_day.used_percentage // empty')"
+weekly_is_live=0
+if [ -n "$weekly_pct" ] && [ "$weekly_pct" != "null" ]; then
+    weekly_is_live=1
+    weekly_resets_at="$(jget '.rate_limits.seven_day.resets_at // empty')"
+    if [ -n "$weekly_resets_at" ] && [ "$weekly_resets_at" != "null" ]; then
+        mkdir -p "$weekly_cache_dir" 2>/dev/null || true
+        printf '%s\n%s\n' "$weekly_pct" "$weekly_resets_at" > "$weekly_cache_file" 2>/dev/null || true
+    fi
+else
+    now="$(date +%s 2>/dev/null || true)"
+    case "$now" in
+        ''|*[!0-9]*) : ;;  # can't tell the time — don't trust a cached value at all
+        *)
+            if [ -f "$weekly_cache_file" ]; then
+                cached_pct="$(sed -n '1p' "$weekly_cache_file" 2>/dev/null || true)"
+                cached_resets_at="$(sed -n '2p' "$weekly_cache_file" 2>/dev/null || true)"
+                case "$cached_resets_at" in
+                    ''|*[!0-9]*) : ;;
+                    *) [ "$now" -lt "$cached_resets_at" ] && weekly_pct="$cached_pct" ;;
+                esac
+            fi
+            ;;
+    esac
+fi
+
+if [ -n "$weekly_pct" ] && [ "$weekly_pct" != "null" ]; then
+    weekly_int="$(printf '%.0f' "$weekly_pct" 2>/dev/null || true)"
+    case "$weekly_int" in
+        ''|*[!0-9]*) : ;;  # non-numeric after rounding — drop the segment
+        *)
+            [ "$weekly_int" -gt 100 ] && weekly_int=100
+            width=10
+            filled=$(( weekly_int * width / 100 ))
+            [ "$filled" -gt "$width" ] && filled=$width
+            empty=$(( width - filled ))
+            bar=""
+            i=0
+            while [ "$i" -lt "$filled" ]; do bar="${bar}█"; i=$((i + 1)); done
+            i=0
+            while [ "$i" -lt "$empty" ]; do bar="${bar}░"; i=$((i + 1)); done
+            c_weekly="$(usage_color "$weekly_int")"
+            approx=""
+            [ "$weekly_is_live" -eq 0 ] && approx="~"
+            segments+=("${c_weekly}weekly:[${bar}] ${approx}${weekly_int}%${c_reset}")
+            ;;
+    esac
+fi
+
+# --- 5. current session usage, as a bar (5-hour rate-limit window) ---
 # `rate_limits` is present only for claude.ai Pro/Max subscribers (or behind a
 # spend-limit gateway), and — unlike context_window — it doesn't exist in the
 # payload AT ALL until the first API response of the session. That's the gap
@@ -191,7 +250,7 @@ if [ -n "$session_pct" ] && [ "$session_pct" != "null" ]; then
     esac
 fi
 
-# --- 5. context window usage, as a pie-style glyph. Defaults to 0 rather
+# --- 6. context window usage, as a pie-style glyph. Defaults to 0 rather
 # than omitting when the field is null/absent — that's what a fresh session
 # and a just-/clear'd one both look like (no API call yet this "session"),
 # and 0% is the true value in both cases, not a stale one. (This is also what

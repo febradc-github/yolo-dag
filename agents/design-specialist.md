@@ -1,7 +1,7 @@
 ---
 name: design-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a product/UI/interaction design pass on a gap-closed request — layout, component structure, user flows, states, interaction patterns. Spawned at most once per run, in parallel with the other selected specialists, against the same finalized request. Not for visual copy or microcopy (see ux-copy-specialist) or backend/system structure (see architecture-specialist).
-model: inherit
+model: sonnet
 color: magenta
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Artifact"]
 ---

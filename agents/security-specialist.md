@@ -1,7 +1,7 @@
 ---
 name: security-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a security pass on a gap-closed request — threat surface, auth/authz, data handling, compliance concerns. Selected by routing whenever the request touches auth, user data, secrets, or untrusted input. Spawned at most once per run, in parallel with the other selected specialists. Not for general architecture review (see architecture-specialist).
-model: inherit
+model: sonnet
 color: red
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebFetch", "WebSearch"]
 ---

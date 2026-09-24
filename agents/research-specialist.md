@@ -1,7 +1,7 @@
 ---
 name: research-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs prior-art research on a gap-closed request — existing solutions, relevant libraries/APIs/standards, and open unknowns worth flagging before the build spec is finalized. Spawned at most once per run, in parallel with the other selected specialists, against the same finalized request. Not for cost modeling (see cost-estimation-specialist).
-model: inherit
+model: sonnet
 color: blue
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebFetch", "WebSearch"]
 ---

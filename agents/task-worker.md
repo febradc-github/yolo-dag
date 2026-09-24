@@ -1,7 +1,7 @@
 ---
 name: task-worker
 description: Use this agent when the Orchestrator dispatches one task from the Phase 4 task graph for execution, as part of one of Phase 5's user-paced passes of concurrent workers, or when merging a finished task onto the run's integration branch conflicts and the task needs redoing on top of the integrated code (integration mode). Given exactly one task, its acceptance criteria, the verbatim text of any shared contract it implements or consumes, and the reports of its declared dependencies — whose actual code is already present in its worktree, because worktrees are based on the integration branch's current tip. Also resumed to rework its own task after a reviewer flags it. Not for verifying finished task output (see task-reviewer) and not for producing the task graph itself (see task-specialist).
-model: inherit
+model: sonnet
 color: green
 tools: ["Read", "Write", "Edit", "NotebookEdit", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Monitor", "TaskOutput", "TaskStop"]
 ---

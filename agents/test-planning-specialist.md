@@ -1,7 +1,7 @@
 ---
 name: test-planning-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a test strategy pass on a gap-closed request — coverage plan, edge cases, acceptance criteria. Spawned at most once per run, in parallel with the other selected specialists, against the same finalized request. Not for actually executing tests (see task-worker and task-reviewer in Phase 5).
-model: inherit
+model: sonnet
 color: green
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebSearch"]
 ---

@@ -1,7 +1,7 @@
 ---
 name: architecture-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a system/component architecture pass on a gap-closed request — components, integration points, trade-offs, failure modes. Spawned at most once per run, in parallel with the other selected specialists, against the same finalized request. Not for data/schema modeling specifically (see data-schema-specialist) or security posture (see security-specialist).
-model: inherit
+model: sonnet
 color: cyan
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebFetch", "WebSearch"]
 ---

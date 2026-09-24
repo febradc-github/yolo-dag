@@ -1,7 +1,7 @@
 ---
 name: data-schema-specialist
 description: Use this agent when the Orchestrator's Phase 1 fan-out needs a data model / schema design pass on a gap-closed request — entities, relationships, storage shape. Selected by routing whenever the request implicates persistence. Spawned at most once per run, in parallel with the other selected specialists. Not for full system architecture (see architecture-specialist).
-model: inherit
+model: sonnet
 color: orange
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebSearch"]
 ---

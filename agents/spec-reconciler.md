@@ -1,7 +1,7 @@
 ---
 name: spec-reconciler
 description: Use this agent once in Phase 3 of the orchestrator skill, after all selected specialists have finished their Phase 2 review loops and their deliverables have been concatenated, to find contradictions *between* specialists that no per-specialist review loop could have caught. Not for reviewing a single deliverable against the request (see spec-reviewer), not for merging findings within one review round (see spec-consolidator), and not for decomposing the reconciled spec into tasks (see task-specialist).
-model: inherit
+model: sonnet
 color: cyan
 tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---

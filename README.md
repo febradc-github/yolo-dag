@@ -278,13 +278,12 @@ prompt (in a plan-only run, which has no cap, it states what a large pass will c
 capping it) — and it says what it dropped. A `lite` run that turns out to be bigger than it looked degrades within `lite`;
 it does not quietly become a `full` run.
 
-Agents declare their own model tier: `spec-consolidator` runs on Haiku (it deduplicates and ranks
-a list someone else wrote), `task-reviewer` on Sonnet (it checks explicit criteria against a
-diff), and everything doing load-bearing reasoning inherits the session model. The orchestrator
-passes no model overrides, with one documented exception: the internal-consistency reviewer in
-each round runs on Sonnet, because three same-model reviewers converge on the same findings and
-miss the same things — model diversity decorrelates them better than a different adjective in
-the prompt.
+Agents declare their own model tier: `spec-consolidator` and `spec-distiller` run on Haiku (both
+are mechanical — deduplicating and ranking a list someone else wrote, or compiling/verifying a
+brief against closed questions), and every other agent — including `task-reviewer` and the three
+`spec-reviewer` instances per round — runs on Sonnet. The orchestrator passes no model overrides;
+the three `spec-reviewer` angles (completeness/gaps, internal consistency, feasibility/risk)
+decorrelate by checklist, not by model.
 
 ## Design: a DAG with bounded loops
 

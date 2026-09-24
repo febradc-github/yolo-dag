@@ -189,12 +189,12 @@ run two tasks with overlapping ownership in the same pass regardless.
   lose everything it already produced. Spawn fresh only where the tree itself has to be fresh: a
   merge-conflict retry in integration mode, a reopened contract consumer, or an agent whose spawn
   is no longer reachable.
-- **Don't override agent models — with one documented exception.** Each agent declares its own
-  tier (`spec-consolidator` runs on Haiku, `task-reviewer` on Sonnet, the rest inherit). Pass no
-  `model` to `Agent`, except: in each Phase 2 review round, spawn the **internal-consistency**
-  `spec-reviewer` with `model: "sonnet"`. Three same-model instances of one agent converge on the
-  same findings and miss the same things; genuine model diversity decorrelates them better than a
-  different adjective in the prompt does.
+- **Don't override agent models.** Each agent declares its own explicit tier in frontmatter —
+  `spec-consolidator` and `spec-distiller` run on Haiku (both are mechanical: deduplicating and
+  ranking work someone else already did, or compiling/verifying a brief against closed
+  questions), every other agent runs on Sonnet. Pass no `model` to `Agent`; the three
+  `spec-reviewer` instances in each Phase 2 round decorrelate by assigned angle (completeness/gaps,
+  internal consistency, feasibility/risk), not by model.
 - **Persist as you go, don't batch it up.** Every phase writes its artifacts to the run directory
   *as it completes*, not at the end. A run that dies at Phase 5 must leave Phases 1–4 fully
   recoverable on disk.
@@ -317,8 +317,7 @@ wait for all of them — they can be at different rounds simultaneously):
 1. Spawn 3 `spec-reviewer` agents in one batch, `run_in_background: true`, each given the path to
    the specialist's current deliverable (`<run-dir>/specialists/<name>/round-<n>.md` — it `Read`s
    this itself), the original request, one of the three named angles defined in the
-   `spec-reviewer` agent file — **completeness/gaps**, **internal consistency** (spawn this one
-   with `model: "sonnet"` — the one model override this pipeline makes, for decorrelation), and
+   `spec-reviewer` agent file — **completeness/gaps**, **internal consistency**, and
    **feasibility/risk** — and the exact path it must `Write` its findings to:
    `<run-dir>/specialists/<name>/round-<r>-findings-<angle>.md` (`r` is this review round's
    number, starting at 1; `angle` one of `completeness`/`consistency`/`feasibility`). **Meter's
