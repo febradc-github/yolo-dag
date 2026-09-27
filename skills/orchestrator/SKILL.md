@@ -1,5 +1,5 @@
 ---
-description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally from the brainstorm skill), routes it to the specialists whose domains apply, closes each with an adversarial review loop, reconciles them into one build spec, decomposes that into a task DAG, then executes it in user-paced passes of worktree-isolated workers — entering implementation directly on a full run, or stopping to ask on a plan-only run — and finally verifies and acceptance-reviews the assembled branch. Phase bodies load on demand from phases/; every phase persists to .dag/runs/<run-id>/ so an interrupted run resumes.
+description: Orchestrator for the yolo-dag plugin — takes a fully-specified request, normally handed off by `brainstorm`, and drives it through six phases to a reviewed integration branch: specialist fan-out, adversarial review, reconciliation, task-DAG decomposition, worktree-isolated execution, acceptance review. Phase bodies load on demand; state persists to .dag/runs/<run-id>/ so an interrupted run resumes.
 argument-hint: Request [mode=auto|lite|full|micro] [--all] [--plan-only]
 ---
 

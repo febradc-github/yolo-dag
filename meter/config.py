@@ -87,7 +87,12 @@ DEFAULTS: dict[str, Any] = {
         "oracle": {"enabled": True, "scope": "run", "max_entries": 5000},
         "sieve": {"enabled": True, "checkers": ["types", "lint", "tests", "ast", "ownership",
                                                  "secrets"], "declare_only_passed": True},
-        "distill": {"enabled": True, "probe_count": 25, "retry": 1, "fetch_rate_alarm": 0.2},
+        # `compile_on_miss` is False because this codebase has exactly one full-spec
+        # consumer (`task-specialist`), and at one consumer a miss provably costs more
+        # than it saves — see meter/distill.py's docstring for the arithmetic. Cache
+        # *hits* stay on: a hash lookup is free, so `check` runs unconditionally.
+        "distill": {"enabled": True, "compile_on_miss": False, "probe_count": 25,
+                    "retry": 1, "fetch_rate_alarm": 0.2},
         "attribution": {"enabled": True, "prune_threshold": 0.15, "min_exposures": 50,
                         "prune": False},
         "pull": {"enabled": False, "promote_threshold": 0.8, "per_agent_override": {}},

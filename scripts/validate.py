@@ -53,9 +53,25 @@ SPINE_BYTE_BUDGET = 21000
 # tool's listing, skill descriptions the skill listing. It is the only part of this
 # plugin with an unconditional cost, so it gets an explicit ceiling rather than being
 # left to grow.
-MAX_AGENT_DESCRIPTION = 460
-MAX_SKILL_DESCRIPTION = 700
+MAX_AGENT_DESCRIPTION = 400
+MAX_SKILL_DESCRIPTION = 420
 MAX_COMMAND_DESCRIPTION = 280
+
+# An agent's *body* is re-paid in full on every spawn of it, so its real cost is
+# bytes x how many times one run spawns it. That product, not the file's size, is what
+# these ceilings are scaled to: `spec-reviewer` is spawned up to ~40 times in a full run
+# (8 specialists x 3 rounds x the reviewer count Gauge sizes), `task-worker` and
+# `task-reviewer` once per task plus reworks, everything else once or twice. A budget is
+# listed here only where the multiplier makes drift expensive; unlisted agents fall to
+# AGENT_BODY_DEFAULT. Raising one of these numbers is a real cost decision -- the honest
+# move is usually to cut prose instead, since none of these files is short on rationale.
+AGENT_BODY_BUDGETS = {
+    "spec-reviewer": 5200,       # ~40 spawns/full run -- the largest single line item
+    "task-worker": 8200,         # 1 per task, plus a rework or integration respawn
+    "task-reviewer": 4900,       # 1 per task, plus a re-review after rework
+    "task-specialist": 9800,     # 1 per run, but the largest file
+}
+AGENT_BODY_DEFAULT = 4600
 
 # The phase each agent declares via the literal "Phase N of the `orchestrator` skill"
 # sentence in its body. This table is the drift guard: the agent files were once written
@@ -255,7 +271,11 @@ def check_agents() -> dict[str, dict]:
         if expected is None:
             warn(f"{rel}: not listed in PRIMARY_PHASE; add it to scripts/validate.py")
         else:
-            match = re.search(r"Phase (\d+) of the `orchestrator` skill", body)
+            # Whitespace-tolerant: the invariant is that the declaration is present, not
+            # that it survived a reflow on one line. The CONTRACTS literals below stay exact
+            # — those are machine strings the orchestrator parses, not prose.
+            match = re.search(r"Phase (\d+) of\s+the\s+`orchestrator`\s+skill",
+                              re.sub(r"\s+", " ", body))
             if not match:
                 fail(f"{rel}: no \"Phase N of the `orchestrator` skill\" declaration in body")
             elif int(match.group(1)) != expected:
@@ -356,6 +376,19 @@ def check_orchestrator(agents: dict[str, dict]) -> None:
                 fail(f"orchestrator: never reads the `{head}` contract emitted by `{owner}`")
 
 
+def check_agent_body_budgets(agents: dict[str, dict]) -> None:
+    """Guard the per-spawn cost. See AGENT_BODY_BUDGETS above."""
+    for stem, data in sorted(agents.items()):
+        size = len(str(data["body"]).encode("utf-8"))
+        budget = AGENT_BODY_BUDGETS.get(stem, AGENT_BODY_DEFAULT)
+        if size > budget:
+            listed = "" if stem in AGENT_BODY_BUDGETS else " (unlisted, so the default applies)"
+            fail(f"agents/{stem}.md: body is {size} bytes, over its {budget}-byte "
+                 f"budget{listed} — an agent body is re-paid in full on every spawn of it, "
+                 f"and this one is spawned more than once per run. Cut prose, or move "
+                 f"run-conditional detail into the orchestrator prompt that spawns it.")
+
+
 def check_description_budgets(agents: dict[str, dict]) -> None:
     """Guard the always-on cost. See MAX_AGENT_DESCRIPTION above."""
     for path in sorted((ROOT / "agents").glob("*.md")):
@@ -396,6 +429,13 @@ def check_cost_reduction_scripts() -> None:
 
     from_defaults = ROOT / "meter" / "config.py"
     config_text = from_defaults.read_text(encoding="utf-8")
+    if '"compile_on_miss"' not in config_text:
+        fail("meter/config.py: distill has no `compile_on_miss` default, but Phase 4 branches "
+             "on the exit code scripts/dag-distill.py derives from it")
+    if "return 3" not in (ROOT / "scripts" / "dag-distill.py").read_text(encoding="utf-8"):
+        fail("scripts/dag-distill.py: never exits 3, but Phase 4 reads exit 3 as "
+             "\"don't compile this miss\" — without it every miss compiles again")
+
     for module in ("fold", "gauge"):
         if f'"{module}"' not in config_text:
             fail(f"meter/config.py: no `{module}` entry in DEFAULTS['modules'], so the "
@@ -709,6 +749,7 @@ def main() -> int:
     check_orchestrator_layout()
     check_orchestrator(agents)
     check_cost_reduction_scripts()
+    check_agent_body_budgets(agents)
     check_description_budgets(agents)
     check_commands()
     check_skills()

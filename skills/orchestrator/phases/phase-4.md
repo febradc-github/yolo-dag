@@ -1,22 +1,24 @@
 ## Phase 4 — Decompose into a task DAG
 
-**Distill first (inert if the `meter` subsystem isn't installed) — skip it entirely in `micro`
-mode.** `micro`'s own definition is "no specialists, no spec review — the request is the spec": by
-the time Phase 4 starts, `merged-spec.md` already holds nothing more than the raw one-sentence
-request, copied verbatim by Phase 1's micro shortcut. There is nothing there to compress, and
-running Distill anyway would spend 2-4 extra foreground spawns (compile, verify, and on a miss a
-revise-and-re-verify round) on exactly the class of run `micro` exists to keep cheap. In `micro`
-mode, skip straight to spawning `task-specialist` below with `merged-spec.md` as its input, exactly
-as in `full`/`lite` when Distill isn't used. Everything below this paragraph applies to `full` and
-`lite` only.
+**Distill's cache check comes first (inert if the `meter` subsystem isn't installed) — skip it
+entirely in `micro` mode.** `micro`'s own definition is "no specialists, no spec review — the
+request is the spec": by the time Phase 4 starts, `merged-spec.md` already holds nothing more than
+the raw one-sentence request, copied verbatim by Phase 1's micro shortcut. There is nothing there
+to compress, and running Distill anyway would spend 2-4 extra foreground spawns (compile, verify,
+and on a miss a revise-and-re-verify round) on exactly the class of run `micro` exists to keep
+cheap. In `micro` mode, skip straight to spawning `task-specialist` below with `merged-spec.md` as
+its input, exactly as in `full`/`lite` when Distill isn't used. Everything below this paragraph
+applies to `full` and `lite` only.
 
-**A note on latency, in the same spirit as the budget-degradation disclosure below.** In `full` and
-`lite` mode, Distill's own critical path — compile, verify, and on a miss a revise-and-re-verify
-round — is fully serial and runs in the foreground, because each step's output gates the next. In
-the worst case (a missed fidelity gate) that is four round-trips stacked before `task-specialist`
-even starts, which is itself foreground and blocking. This is a deliberate correctness-over-latency
-trade, not an oversight: the fidelity gate exists specifically so a compressed brief is never used
-uncompressed-and-unverified, and that guarantee costs the round-trips it costs.
+**Compiling a fresh brief is off by default, and a cache hit is what you are actually checking
+for.** A hit is a local hash lookup: free, no spawn, and it hands you a brief already verified by
+the gate below. A *miss* is a different question — whether compiling one is worth it — and at one
+full-spec consumer it isn't: `meter/distill.py`'s docstring works the arithmetic, and compiling
+costs several times what handing `task-specialist` a brief instead of the spec saves, on top of
+2-4 serial foreground spawns stacked ahead of a step that is itself foreground and blocking. So
+`distill.compile_on_miss` defaults to false and `check` reports that with its own exit code. This
+costs no fidelity: the full spec is strictly the more faithful input, and steps 1-5 below are
+unchanged for a deployment that turns compiling back on.
 
 Every `dag-distill.py`
 reference below means: locate it the same way `/dag-meter` does (`${CLAUDE_PLUGIN_ROOT}/scripts/
@@ -24,9 +26,17 @@ dag-distill.py`, falling back to searching `~/.claude/plugins` for a `yolo-dag` 
 back to `scripts/dag-distill.py` relative to the current directory) and run it with `python3` —
 the plugin isn't necessarily under the current directory. Before spawning `task-specialist`, check
 whether a compiled brief for this exact spec already exists: `dag-distill.py check
-<run-dir>/merged-spec.md`. Exit `0` with output means a cached brief exists (an identical spec was
-distilled before, this run or a prior one) — use its printed content in place of the full spec
-below and skip straight to spawning `task-specialist`. Exit `1` means no cache hit; compile fresh:
+<run-dir>/merged-spec.md`. Branch on the exit code:
+
+- **Exit `0`** (a brief is printed) — an identical spec was distilled before, this run or a prior
+  one. Use the printed content in place of the full spec below and skip straight to spawning
+  `task-specialist`.
+- **Exit `3`** — a miss that is deliberately not worth compiling (the default). **Spawn no
+  `spec-distiller` at all**, skip steps 1-5 entirely, and spawn `task-specialist` with the full
+  `<run-dir>/merged-spec.md`. This is the common path, and it is not a degradation worth reporting
+  — it's the configured default, so don't mention it in the summary.
+- **Exit `1`** — a miss that *should* be compiled (`distill.compile_on_miss` is on). Compile
+  fresh:
 
 1. Spawn `spec-distiller` in **compile mode**, foreground, with the path to the merged spec (it
    `Read`s it itself), `meter.modules.distill.probe_count` (default 25, use 25 if `meter` config

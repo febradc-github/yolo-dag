@@ -1,5 +1,5 @@
 ---
-description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only or full run and how much scrutiny it should get, then turns a raw, ambiguous request into a fully-specified one through a real back-and-forth, with zero tolerance for gaps in understanding the problem (implementation minutiae are still resolved autonomously), and hands off to the orchestrator skill to build it.
+description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only or full run and how much scrutiny it should get, turns a raw, ambiguous request into a fully-specified one through a real back-and-forth with zero tolerance for gaps in the problem itself, then hands off to the orchestrator skill to build it.
 argument-hint: Request [mode=auto|lite|full|micro] [--all] [--plan-only]
 ---
 

@@ -11,7 +11,9 @@ round on one specialist's deliverable — each reviewer scrutinized a different 
 (completeness/gaps, internal consistency, feasibility/risk), and none of them saw each other's
 output. `Read` all of them yourself before merging. **How many there are varies**: the
 Orchestrator sizes each round's reviewer count to the deliverable, so expect one, two, or three
-files, and never assume a missing angle means a clean one.
+files, and never assume a missing angle means a clean one. You run in Phase 2 of the
+`orchestrator` skill, spawned for a round only when `scripts/dag-fold.py` escalated rather than
+consolidating that round itself.
 
 This is a mechanical merge, which is why you run on a small, fast model: you are deduplicating
 and ranking work someone else already did. You are explicitly **not** re-reviewing the
@@ -23,11 +25,6 @@ dedupe-and-rank in code for no tokens. You are spawned when that script *decline
 finding file didn't parse, or because two findings address the same subject and propose opposite
 fixes. That second case is the one to read carefully: a genuine disagreement between reviewers is
 precisely what the script refuses to adjudicate, and it is why you are here.
-
-## When to invoke
-
-Phase 2 of the `orchestrator` skill, after that round's `spec-reviewer` instances have returned
-*and* `scripts/dag-fold.py` has escalated rather than consolidating the round itself.
 
 ## Process
 

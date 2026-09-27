@@ -6,7 +6,10 @@ skill, not here — this script only owns the hash-keyed cache).
 Usage:
   python3 scripts/dag-distill.py check <spec-file>
       Prints the cached brief to stdout and exits 0 if this exact spec's
-      content is already cached; exits 1 (nothing on stdout) on a miss.
+      content is already cached; exits 1 (nothing on stdout) on a miss;
+      exits 3 on a miss that should NOT be compiled (`distill.compile_on_miss`
+      is false, the default — see meter/distill.py for the arithmetic). The
+      orchestrator reads 3 as "use the full spec and spawn no distiller".
   python3 scripts/dag-distill.py store <spec-file> <brief-file>
       Caches <brief-file>'s content, keyed by <spec-file>'s content hash.
   python3 scripts/dag-distill.py record-fetch <spec-file>
@@ -18,8 +21,8 @@ Usage:
 Talks directly to the SQLite store, not the daemon over HTTP — none of this
 is hot-path, and it needs to work even if the daemon isn't currently running.
 Always exits 0 for `store`/`record-fetch`/`stats` (fire-and-forget bookkeeping
-commands); `check` is the one command whose exit code is meaningful (cache
-hit vs. miss) and is documented as such above.
+commands); `check` is the one command whose exit code is meaningful (hit /
+compile-this-miss / don't-compile-this-miss) and is documented as such above.
 """
 
 from __future__ import annotations
@@ -47,26 +50,40 @@ def _read_spec(path_arg: str) -> str | None:
         return None
 
 
-def _distill_enabled() -> bool:
-    repo_root = config_mod.find_repo_root(Path.cwd())
-    cfg = config_mod.load_config(repo_root)
+def _load_cfg() -> dict:
+    return config_mod.load_config(config_mod.find_repo_root(Path.cwd()))
+
+
+def _distill_enabled(cfg: dict | None = None) -> bool:
+    cfg = _load_cfg() if cfg is None else cfg
     if not config_mod.is_enabled(cfg):
         return False
     return bool((cfg.get("modules") or {}).get("distill", {}).get("enabled"))
 
 
 def cmd_check(spec_path: str) -> int:
-    if not _distill_enabled():
+    cfg = _load_cfg()
+    if not _distill_enabled(cfg):
         return 1  # off switch: every check is a miss, same effect as "never cached"
     spec_text = _read_spec(spec_path)
     if spec_text is None:
         return 1
     conn = store.connect(config_mod.plugin_data_dir())
     entry = distill.get_cached_brief(conn, spec_text)
-    if entry is None:
-        return 1
-    print(entry["brief"])
-    return 0
+    if entry is not None:
+        print(entry["brief"])
+        return 0
+    # A miss. Whether it is worth compiling is a cost question, not a cache question:
+    # at one full-spec consumer the compile never pays for itself, so the default is
+    # to decline and let the orchestrator use the full spec (which is also the more
+    # faithful input). Exit 1 stays the "compile it" signal for a deployment that
+    # turns `compile_on_miss` back on.
+    if not distill.compile_on_miss(cfg):
+        print("meter: distill cache miss; compile_on_miss is off, so use the full spec "
+              "and spawn no distiller (meter/distill.py explains the arithmetic).",
+              file=sys.stderr)
+        return 3
+    return 1
 
 
 def cmd_store(spec_path: str, brief_path: str) -> int:

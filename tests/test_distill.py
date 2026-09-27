@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
 import sqlite3
+import subprocess
+import sys
+import tempfile
 import unittest
 
-from meter import distill, store
+from meter import config, distill, store
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class DistillCacheTests(unittest.TestCase):
@@ -59,6 +66,57 @@ class DistillCacheTests(unittest.TestCase):
         distill.store_brief(self.conn, spec_text=self.spec, brief="v2", source_path=None)
         entry = distill.get_cached_brief(self.conn, self.spec)
         self.assertEqual(entry["brief"], "v2")
+
+
+class CompileOnMissTests(unittest.TestCase):
+    """v0.17.0: a cache *hit* is free, but compiling a fresh brief costs 2-4 foreground
+    spawns to save one consumer's read of the spec — arithmetic that never closes at one
+    consumer. So `compile_on_miss` defaults off, and the CLI's exit code says so."""
+
+    def test_default_config_does_not_compile_on_miss(self):
+        self.assertFalse(distill.compile_on_miss(config.DEFAULTS))
+
+    def test_missing_key_reads_as_off(self):
+        self.assertFalse(distill.compile_on_miss({"modules": {"distill": {}}}))
+        self.assertFalse(distill.compile_on_miss({"modules": {}}))
+        self.assertFalse(distill.compile_on_miss({}))
+
+    def test_repo_config_can_turn_it_back_on(self):
+        cfg = {"modules": {"distill": {"enabled": True, "compile_on_miss": True}}}
+        self.assertTrue(distill.compile_on_miss(cfg))
+
+    def test_distill_is_still_enabled_by_default(self):
+        """Only the compile branch is off. The cache itself stays on, so a hit still
+        short-circuits Phase 4 for free."""
+        self.assertTrue(config.DEFAULTS["modules"]["distill"]["enabled"])
+
+
+class DistillCliExitCodeTests(unittest.TestCase):
+    """Phase 4 branches on three distinct exit codes; the script is the only place that
+    decides between 1 and 3, so pin the mapping here."""
+
+    def setUp(self):
+        spec = pathlib.Path(tempfile.mkdtemp()) / "merged-spec.md"
+        spec.write_text("a spec that is not in any cache", encoding="utf-8")
+        self.spec = spec
+
+    def _run(self, env_extra=None):
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_DATA"] = tempfile.mkdtemp()
+        env.update(env_extra or {})
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "dag-distill.py"), "check", str(self.spec)],
+            capture_output=True, text=True, env=env, cwd=tempfile.mkdtemp(), check=False)
+
+    def test_miss_with_compile_off_exits_3(self):
+        result = self._run()
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, "", "exit 3 must print no brief to use")
+
+    def test_meter_disabled_still_exits_1(self):
+        """The off switch keeps its old meaning: an ordinary miss, not the new signal."""
+        result = self._run({"DAG_METER_DISABLE": "1"})
+        self.assertEqual(result.returncode, 1)
 
 
 if __name__ == "__main__":

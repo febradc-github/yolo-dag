@@ -34,6 +34,25 @@ this specific codebase is narrower than the spec's own framing assumes
 (cross-run/cross-repo reuse of an identical spec, not "every agent in the
 run" — there's only one full-spec consumer per run here), and that's stated
 plainly rather than oversold.
+
+**`compile_on_miss` defaults to False, and the arithmetic is why.** With one
+consumer, a cache miss can never pay for itself. Compiling costs a
+full-spec read (S), a verify read of the brief (~0.3S), and the brief plus a
+25-probe answer key as *output* — which bills at roughly 5x input — then the
+verify pass's answers again: call it 2.8S + ~15k tokens, before the
+revise-and-re-verify round a failed gate adds. The saving is one agent
+reading a brief instead of the spec: 0.7S. 2.8S + 15k < 0.7S has no
+solution, so on a miss this module spends tokens to save fewer tokens, every
+time, and it also puts 2-4 serial foreground spawns on the critical path.
+
+A cache *hit* is genuinely free — a local hash lookup, no model call — so
+`check` stays on the Phase 4 path unconditionally and the store keeps
+working. Only the compile-on-miss branch is off. Turn it back on for a
+deployment that grows a second full-spec consumer, or where the same spec
+recurs often enough that priming the cache pays for itself; the fidelity gate
+that makes a brief safe to use is unchanged either way, and nothing here
+judges brief *quality* — the full spec is strictly the more faithful input,
+so this default costs no fidelity at all.
 """
 
 from __future__ import annotations
@@ -43,6 +62,14 @@ import sqlite3
 from typing import Any
 
 from . import store
+
+
+def compile_on_miss(cfg: dict[str, Any]) -> bool:
+    """Whether a cache miss should compile a fresh brief. Default False — see this
+    module's docstring for the arithmetic. A hit is unaffected and always free."""
+    modules = cfg.get("modules") or {}
+    distill_cfg = modules.get("distill") or {}
+    return bool(distill_cfg.get("compile_on_miss", False))
 
 
 def compute_spec_hash(spec_text: str) -> str:

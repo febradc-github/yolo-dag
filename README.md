@@ -357,7 +357,7 @@ Deliverable depth is still expected to track the request's actual complexity (a 
 client-only page doesn't need enterprise-scale documentation regardless of how it's transported) —
 that's a separate, complementary discipline, not something this mechanism enforces on its own.
 
-## What this costs, and what v0.16.0 did about it
+## What this costs, and what v0.16.0 / v0.17.0 did about it
 
 A pipeline that spawns this many agents has three separate token costs, and they respond to
 completely different fixes.
@@ -429,6 +429,63 @@ ever reduces from a ceiling it cannot raise. Disable either in `.dag/meter.json`
 
 Setting `meter.modules.gauge.min_reviewers` raises Gauge's floor if you want more scrutiny than
 it picks.
+
+### v0.17.0: the same three layers, measured again
+
+0.16.0 cut each layer once. Re-measuring afterwards showed the biggest remaining line item was
+not the one that got the most attention.
+
+**An agent's body is re-paid in full on every spawn of it**, so its true cost is bytes × spawns
+per run — and after Gauge, `spec-reviewer` is still spawned ~40 times in a `full` run. At 6.7 KB
+that one file was **~270 KB of input per run, more than half of all agent-definition text the
+pipeline sends, and 40× the entire always-on layer**. Nothing measured it, because the always-on
+ceiling measures descriptions and the spine budget measures the skill.
+
+So `spec-reviewer`, `task-worker` and `task-reviewer` — the three agents a run spawns more than
+once or twice — were rewritten to carry every operative instruction and no narrative retelling of
+it: 27%, 13% and 14% off their bodies. Every literal contract string (`REVIEW: FINDINGS`,
+`WORKTREE:`/`BRANCH:`/`COMMIT:`/`BLOCKER:`, `VERDICT:`, the `dag-receipt` schema and the blocker
+enum), every checklist item and every confidence rule is unchanged and still validated. The eight
+Phase 1 specialists shared four blocks of near-identical boilerplate; each agent also opened with
+a `## When to invoke` section restating the routing rule that had *already selected it*, which the
+running agent cannot act on. Folded to one sentence.
+
+Measured across a `full` run (8 specialists, 3 rounds, ~40 reviewers, 10 tasks), agent-definition
+text drops from **~467 KB to ~366 KB — ~25,000 tokens per run, 21% off**. `scripts/validate.py`
+now enforces a per-agent body budget *scaled to spawn multiplicity*, so the agent spawned 40 times
+has a tighter ceiling than the one spawned once.
+
+**Two structural fixes, both removing work rather than shortening prose:**
+
+- **Distill no longer compiles on a cache miss** (`distill.compile_on_miss`, new, default false).
+  A cache *hit* is a local hash lookup — free, and it stays on the Phase 4 path unconditionally. A
+  *miss* is a different question, and the arithmetic never closed: compiling costs a full-spec
+  read, a verify read, and a brief plus a 25-probe answer key as **output**, which bills at ~5×
+  input — against a saving of one agent reading a brief instead of the spec. `meter/distill.py`
+  already documented that this codebase has exactly one full-spec consumer; 0.17.0 follows that
+  through to its conclusion. This removes **2 serial foreground spawns from every `full` and `lite`
+  run** (4 when the fidelity gate misses), and costs no fidelity at all — `task-specialist` now
+  gets the full, unabridged spec, which is strictly the more faithful input. `scripts/dag-distill.py
+  check` reports it with a distinct exit code (`3`) so the decision is deterministic, not a prose
+  instruction the orchestrator might read past.
+
+- **Phase 5 hands a dependent task its dependencies' receipts, not their full prose reports.** A
+  worker's worktree already *contains* its dependencies' code, and the spine's own ground rules say
+  to pass a path rather than restate a large artifact — Phase 5 was the one place in the pipeline
+  still restating in full, once per dependent. The `dag-receipt` block carries the same substance
+  in bounded form (files and spans touched, symbols, which criteria were met with what evidence,
+  the verification command and its exit code, contracts owned and consumed, risks). If a
+  dependency emitted no valid receipt, that dependency alone falls back to its prose report, so no
+  context is ever silently dropped.
+
+The always-on layer moved too — the `orchestrator` skill's description was the single largest item
+in it, for a skill reached by handoff from `brainstorm` or `/dag-resume` and never chosen cold off
+the listing. It and `brainstorm`'s are now 401 and 321 chars, and the ceilings dropped 460→400
+(agents) and 700→420 (skills) to hold it.
+
+All three layers now have a test, not just a validator check: `tests/test_cost_budgets.py` asserts
+the per-spawn budgets bite, the always-on total stays bounded, and the phase bodies still outweigh
+the spine that indexes them.
 
 ## Meter (on by default, measurement only)
 
@@ -567,10 +624,12 @@ framing (cross-run/cross-repo reuse of an identical spec, not "every agent in th
 only one full-spec consumer per run in this codebase). Distill is skipped entirely in `micro`
 mode — there `merged-spec.md` already holds nothing beyond the raw request, and compiling a brief
 from a spec that's already one sentence would add pure round-trip overhead to the exact class of
-run `micro` exists to keep cheap. In `full`/`lite`, Distill's compile-verify(-revise-reverify)
-sequence is fully serial and foreground by construction (each step gates the next), which is a
-deliberate correctness-over-latency trade documented alongside its Phase 4 usage in
-`skills/orchestrator/SKILL.md`, not an oversight.
+run `micro` exists to keep cheap. **As of v0.17.0 the compile path is also off by default in
+`full`/`lite`** (`distill.compile_on_miss: false`) — one full-spec consumer cannot amortise a
+compile-verify round whose output bills at ~5× input, so a miss now falls straight through to the
+full spec and only a cache hit is used. The compile-verify(-revise-reverify) sequence itself is
+unchanged, still fully serial and foreground by construction (each step gates the next), for
+anyone who turns it back on.
 
 **R3's measurement half, M14 Attribution, is also done** (M14 ships and measures alone before M10
 Pull is even considered, per the spec's own release plan — see below). It records, for each node,

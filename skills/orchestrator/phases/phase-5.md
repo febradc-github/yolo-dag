@@ -54,9 +54,19 @@ the whole DAG landing at once. It happens in both run types, plan-only and full 
 5. **Spawn one `task-worker` per selected task**, `run_in_background: true`, with
    `isolation: "worktree"`. Give each worker its task, its acceptance criteria, its `owns` list,
    the verbatim text of every contract it implements or consumes (from `tasks.json`'s `contracts`
-   array — the *current* version, not the version quoted in an older report), and the final
-   reports of every task in its `depends_on` — noting that the dependencies' actual code is
-   already present in its tree, and the reports are context, not the source of truth.
+   array — the *current* version, not the version quoted in an older report), and, **for each task
+   in its `depends_on`, that task's `dag-receipt` block rather than its full prose report**.
+
+   The receipt is the bounded form of the same information — files and spans touched, symbols,
+   which criteria were met with what evidence, the verification command and exit code, contracts
+   owned/consumed, risks — and a dependent needs no more than that, because its worktree already
+   *contains* the dependency's code. Pasting several full reports instead re-pays each one as
+   input for every dependent, to restate what the tree already holds; that is exactly the
+   "give it the path, not the text" rule in the spine's ground rules, applied to the one place in
+   this pipeline that was still restating in full. Say plainly that the dependencies' code is
+   already present and the receipts are context, not the source of truth. **If a dependency
+   emitted no valid receipt** (it failed, or `meter` isn't installed to validate one), fall back to
+   its prose report for that dependency alone — never drop the dependency's context entirely.
 
    **The number is a target, not a guarantee.** If the runtime won't spawn that many agents at
    once, spawn as many as it allows and queue the remainder *as part of this same pass*,
