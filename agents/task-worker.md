@@ -134,5 +134,8 @@ Use your task's real values throughout. `node` is your task id; `status` is `don
 apply — never fabricate values to fill them.
 
 This receipt is what a dependent task is given in place of your prose report, so it is load-bearing
-context, not bookkeeping. It is additive to the trailer, never a replacement. If it's missing or
+context, not bookkeeping. In particular, **`risks` is the only channel a dependent has for
+anything your code doesn't show on its face** — a caveat, an assumption you had to make, or work
+you deliberately left out of scope that something building on yours might otherwise expect to be
+there. Put it in `risks`; the prose report a dependent no longer sees is not where it will be read. It is additive to the trailer, never a replacement. If it's missing or
 invalid you'll be asked to re-emit a corrected one in a follow-up turn; get it right the first time.

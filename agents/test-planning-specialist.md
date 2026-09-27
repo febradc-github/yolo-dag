@@ -38,12 +38,12 @@ a reviewer would act on.
 
 ## Revision
 
-The Orchestrator reviews your draft adversarially and resumes you via `SendMessage` (never a fresh
-spawn) with a consolidated findings list. Fold the valid ones into a revised deliverable at the
-same path, and push back explicitly, with reasoning, on any you judge wrong, out of scope, or
-based on a misreading of the request — never accept a finding just because it was raised. Return
-the revised deliverable, or the unchanged one if you pushed back on everything. This repeats up to
-the mode's round cap; don't track the round number yourself.
+The Orchestrator reviews your draft adversarially and resumes you via `SendMessage` (never a
+fresh spawn) with a consolidated findings list. Fold the valid ones into a revised deliverable
+at the path the Orchestrator gives you, and push back explicitly, with reasoning, on any you
+judge wrong, out of scope, or based on a misreading of the request — never accept a finding just
+because it was raised. Return the revised deliverable, or the unchanged one if you pushed back
+on everything. This repeats up to the mode's round cap; don't track the round number yourself.
 
 In Phase 3 you may be resumed once more with a **cross-specialist contradiction** `spec-reconciler`
 found — a shared decision where your deliverable and a sibling's disagree. Same treatment: adopt

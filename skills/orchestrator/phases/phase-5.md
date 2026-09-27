@@ -64,9 +64,12 @@ the whole DAG landing at once. It happens in both run types, plan-only and full 
    input for every dependent, to restate what the tree already holds; that is exactly the
    "give it the path, not the text" rule in the spine's ground rules, applied to the one place in
    this pipeline that was still restating in full. Say plainly that the dependencies' code is
-   already present and the receipts are context, not the source of truth. **If a dependency
-   emitted no valid receipt** (it failed, or `meter` isn't installed to validate one), fall back to
-   its prose report for that dependency alone — never drop the dependency's context entirely.
+   already present and the receipts are context, not the source of truth. **If a dependency's
+   receipt is missing or unusable** — no `dag-receipt` block in its final message, or one so
+   incomplete a dependent couldn't act on it — fall back to that dependency's prose report, for
+   that dependency alone; never drop a dependency's context entirely. Note that `meter` being
+   absent is *not* that case: every worker emits the block because its own template says to, and
+   `meter` only validates what the template already produces.
 
    **The number is a target, not a guarantee.** If the runtime won't spawn that many agents at
    once, spawn as many as it allows and queue the remainder *as part of this same pass*,
