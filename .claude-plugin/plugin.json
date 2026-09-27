@@ -1,6 +1,6 @@
 {
   "name": "yolo-dag",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "Turns an ambiguous request into a reviewed, executed, integrated git branch. /brainstorm closes the gaps, then the orchestrator routes to the relevant domain specialists, hardens each against adversarial review, reconciles them into one build spec, and decomposes it into independent tasks bound by explicit contracts — executed in user-paced passes of worktree-isolated workers, each reviewed before it merges, finishing with a whole-suite run and an acceptance review of the assembled diff. Every phase persists to .dag/runs/<run-id>/ so an interrupted run resumes. Ships with meter, a local zero-network subsystem that measures the run's own token spend and removes redundant cost without changing what the pipeline does (/dag-meter).",
   "author": {
     "name": "Dan Febra",

@@ -4,6 +4,14 @@ Paste the prompt in the fenced block below into nano banana (Gemini's image mode
 written as one self-contained prompt — everything the model needs to know about the pipeline is
 in it; it doesn't assume the model has read this repo.
 
+> **Status: `workflow.jpeg` and `workflow.gif` are one pipeline shape behind this prompt.** Both
+> were generated before v0.16.0, when Phase 2 spawned a constant 3 reviewers plus a consolidator
+> agent every round — they still show that. The prompt below and `workflow.svg` were corrected in
+> v0.17.1: the reviewer count is now sized to the deliverable (Gauge) and consolidation is a script
+> that escalates to the agent only on a real disagreement (Fold). Regenerating the raster images
+> needs a pass through nano banana, so it can't happen in a commit; until it does, the SVG is the
+> accurate picture. Delete this note once the images are regenerated.
+
 Suggested use: generate it, then look specifically at (a) whether all six phase labels are legible
 and correctly ordered left-to-right, and (b) whether the two loop callouts (review loop, task
 rework loop) read as *bounded* loops (a small loop-back arrow with a round-cap label) rather than
@@ -35,15 +43,16 @@ gradient stroke, with small soft-glow arrowheads. Use a cohesive, vibrant accent
 that flows across the whole pipeline left to right — e.g. electric blue → violet → magenta →
 warm amber — so the eye reads progress through the pipeline as a shift in color, not just position.
 Typography: clean, modern, geometric sans-serif (Inter/Söhne-style), bright near-white text on
-dark cards for strong contrast, with the largest text reserved for the eight stage titles. Add
+dark cards for strong contrast, with the largest text reserved for the seven stage titles. Add
 tasteful ambient detail — soft particle/bokeh glow, faint circuit-like linework in the background
 at low opacity — enough to feel high-production-value, without ever crowding or fighting the
 labels. No photorealism, no literal photos or 3D renders of people/hardware, and nothing so busy
 that a stage's label becomes hard to read — beautiful and legible, not beautiful instead of
 legible.
 
-OVERALL SHAPE: a left-to-right pipeline with eight stages in a row, connected by arrows, plus two
-small annotated side-loops and one small footnote panel. Structure it exactly like this:
+OVERALL SHAPE: a left-to-right pipeline with seven stages in a row — `brainstorm`, then one per
+phase — connected by arrows, plus two small annotated side-loops and one small footnote panel.
+Structure it exactly like this:
 
 STAGE 1 — "brainstorm" (leftmost, the cool end of the accent gradient — electric blue):
 a single rounded glass card labeled "brainstorm" with three small bullet icons/labels beneath it reading
@@ -60,9 +69,14 @@ conditional".
 STAGE 3 — "Phase 2: Build + Review Loop": a box labeled "Build + Review Loop (per specialist)".
 Inside or beside it, draw a small self-contained loop diagram: one box "specialist drafts" →
 arrow to three small parallel boxes labeled "reviewer: completeness", "reviewer: consistency",
-"reviewer: feasibility" → arrow converging into one box "consolidator" → arrow labeled "revise"
-looping back to "specialist drafts". On the loop-back arrow, add a small round badge that reads
-"up to 3 rounds" to make clear this is a bounded loop, not an infinite cycle.
+"reviewer: feasibility" → arrow converging into one box labeled "consolidate" → arrow labeled
+"revise" looping back to "specialist drafts". Render the third reviewer box in a lighter/outlined
+style than the first two (matching how Stage 2 distinguishes always-selected from conditional
+specialists) and label the group with a small caption reading "count sized to the deliverable" —
+the panel is up to three reviewers, not always three. Give the "consolidate" box a small gear or
+script glyph rather than a robot/agent glyph, with a tiny caption "by script; agent only on a real
+disagreement". On the loop-back arrow, add a small round badge that reads "up to 3 rounds" to make
+clear this is a bounded loop, not an infinite cycle.
 
 STAGE 4 — "Phase 3: Merge & Reconcile": a box labeled "Merge & Reconcile" showing several small
 document icons (one per specialist) flowing into one larger combined document icon labeled "merged
@@ -108,8 +122,8 @@ of a solid one, so it still reads as visually distinct at a glance.
 ## If you want a second, simpler version
 
 The prompt above is dense — it's aiming for something close to the detail level of the existing
-`assets/workflow.svg`. If nano banana struggles to keep eight stages plus two side-loops legible
+`assets/workflow.svg`. If nano banana struggles to keep seven stages plus two side-loops legible
 in one image, ask it to drop the two in-flow loop diagrams (Phase 2's review loop and the
-footnote panel) and render *only* the eight-stage top-level flow first; then generate the loop
+footnote panel) and render *only* the seven-stage top-level flow first; then generate the loop
 detail and the artifact-writing footnote as two small separate inset graphics you place around the
 main flow when assembling the final image.
