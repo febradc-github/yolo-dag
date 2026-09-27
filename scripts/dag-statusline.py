@@ -34,6 +34,23 @@ plugin's installed copy or a dev checkout) — copied into `<cwd>/.claude/`, so
 the result is self-contained and independently committable per repo, exactly
 like yolo-dag's own.
 
+The `statusLine` block it writes carries two things beyond the bare command, both
+fixes for a statusline that "sometimes doesn't show":
+
+- `refreshInterval` — Claude Code re-runs the script only on events (a new assistant
+  message, `/compact`, a permission-mode change...). Those go quiet while a coordinator
+  sits idle waiting on background subagents, which is most of a pipeline run's Phase 2,
+  so without a timer the bar goes stale or blank exactly when a run is busiest.
+- `${CLAUDE_PROJECT_DIR:-.}` in the command path — a bare `bash .claude/statusline.sh`
+  is resolved against the *current* directory, so if the session's cwd is ever not the
+  project root the script isn't found, exits 127, and Claude Code blanks the bar. The
+  `:-.` fallback keeps the old behavior wherever the variable isn't set.
+
+`on` also upgrades an already-configured project that still has the exact legacy
+command this script used to write (no `refreshInterval`, relative path), so projects
+bootstrapped before this fix pick it up without being turned off and on again. Any
+statusline the user configured themselves is left untouched.
+
 Like most settings.json edits, a change here may not affect the *current*
 session's rendered statusline until the next one starts — this script edits
 the file honestly and says what it did; it doesn't claim to hot-apply it.
@@ -48,6 +65,20 @@ import sys
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+
+# What `on` writes. See the module docstring for why both extras are here.
+STATUSLINE_COMMAND = 'bash "${CLAUDE_PROJECT_DIR:-.}/.claude/statusline.sh"'
+STATUSLINE_REFRESH_SECONDS = 10
+# The exact command earlier versions wrote — the only one `on` will upgrade in place.
+LEGACY_STATUSLINE_COMMAND = "bash .claude/statusline.sh"
+
+
+def _statusline_block() -> dict:
+    return {
+        "type": "command",
+        "command": STATUSLINE_COMMAND,
+        "refreshInterval": STATUSLINE_REFRESH_SECONDS,
+    }
 
 
 def _settings_path(project_dir: Path) -> Path:
@@ -102,6 +133,18 @@ def cmd_off(path: Path) -> None:
 def cmd_on(path: Path) -> None:
     data = _load(path)
     if "statusLine" in data:
+        current = data["statusLine"]
+        if (
+            isinstance(current, dict)
+            and current.get("command") == LEGACY_STATUSLINE_COMMAND
+            and "refreshInterval" not in current
+        ):
+            data["statusLine"] = _statusline_block()
+            _save(path, data)
+            print(f"statusline: already on — upgraded the legacy config in {path} to refresh "
+                  f"on a timer and resolve its script from the project root. "
+                  f"Takes effect next session.")
+            return
         print("statusline: already on.")
         return
     if "_statusLineDisabled" in data:
@@ -127,7 +170,7 @@ def cmd_on(path: Path) -> None:
         print(f"statusline: could not set up {target_script}: {exc!r}")
         return
 
-    data["statusLine"] = {"type": "command", "command": "bash .claude/statusline.sh"}
+    data["statusLine"] = _statusline_block()
     _save(path, data)
     print(f"statusline: set up and on in {path} (script copied to {target_script} from this "
           f"plugin's template). Takes effect next session.")

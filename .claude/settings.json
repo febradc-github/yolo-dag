@@ -1,6 +1,7 @@
 {
   "statusLine": {
-    "command": "bash .claude/statusline.sh",
+    "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/statusline.sh\"",
+    "refreshInterval": 10,
     "type": "command"
   }
 }
