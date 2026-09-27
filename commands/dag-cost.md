@@ -1,5 +1,5 @@
 ---
-description: Show measured token spend for one yolo-dag run — meter's Ledger (M0), not the orchestrator's spawn-unit estimate. Reports "not available" plainly if meter never ran for this run.
+description: Show measured token spend for yolo-dag runs, broken down by phase, agent type, and node.
 argument-hint: A run id (e.g. 2026-08-21-a3f9). Omit to use the most recent run.
 allowed-tools: ["Read", "Glob", "Bash"]
 ---

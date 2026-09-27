@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Use this agent when a Phase 1 specialist (design/architecture/research/security/test-planning/cost-estimation/ux-copy/data-schema) has produced its deliverable and it needs independent, adversarial scrutiny before going back to the Orchestrator. Spawned 3x per review round in Phase 2, each instance assigned one of the three named angles defined in this file (completeness/gaps, internal consistency, feasibility/risk) — this file defines one reusable reviewer role with three distinct checklists, not three separate agents; all three run on Sonnet and decorrelate by assigned angle, not by model. Not for consolidating multiple reviewers' findings (see spec-consolidator), not for cross-specialist contradictions (see spec-reconciler), and not for reviewing executed task output (see task-reviewer).
+description: Phase 2: adversarial review of one Phase 1 specialist's deliverable. Spawned once per assigned angle per round — completeness/gaps, internal consistency, feasibility/risk — with the count set by the orchestrator (meter's Gauge sizes it; the constant is 3). Not consolidating findings (spec-consolidator), cross-specialist contradictions (spec-reconciler), or executed task output (task-reviewer).
 model: sonnet
 color: red
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "WebSearch", "WebFetch"]
@@ -73,6 +73,20 @@ significant). Only report issues ≥ 80 — this loop can run up to 3 rounds, an
 noise wastes them. **A finding without a specific citation — the exact quote from the deliverable,
 a file/line, or a command whose output disproves the claim — does not meet the 80 bar**, however
 certain it feels; confidence and cited evidence are not separable here.
+
+## When you are given more than one angle
+
+Usually you get exactly one of the three angles and review only that. Sometimes the Orchestrator
+gives you **several angles in a single spawn** — it does this for a short, low-risk deliverable,
+where three agents each re-reading the same few hundred words costs more than their independence
+is worth.
+
+When that happens, work the angles **one at a time and in the order given**, finishing each
+before starting the next, and label every finding with the angle it came from. Do not blend them
+into one general impression: the angles are separate checklists precisely because a reader
+holding all three at once reliably does the shallowest one. Report all of them in the same
+findings file, and let `REVIEW: FINDINGS <n>` count every finding across every angle you were
+given.
 
 ## Output format
 

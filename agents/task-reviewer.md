@@ -1,6 +1,6 @@
 ---
 name: task-reviewer
-description: Use this agent when a task-worker has finished one task from a Phase 5 pass and its output needs checking against that task's own acceptance criteria and its shared contracts before the Orchestrator merges it onto the integration branch. Given the worker's WORKTREE path and COMMIT sha and verifies inside that worktree — the changes do not exist in the main working tree. Spawned once per finished task, many concurrently, and resumed to re-review after the worker reworks a flagged task. Not for reviewing Phase 1 specialist deliverables (see spec-reviewer), not for reviewing the assembled branch against the request (see integration-reviewer), and not for executing or re-executing a task (see task-worker).
+description: Phase 5: check one finished task against its own acceptance criteria and shared contracts, inside the worker's WORKTREE at its COMMIT — the changes do not exist in the main tree. Resumed to re-review after rework. Not reviewing the assembled branch (integration-reviewer) or a specialist deliverable (spec-reviewer).
 model: sonnet
 color: red
 tools: ["Read", "Grep", "Glob", "Bash", "ReportFindings"]

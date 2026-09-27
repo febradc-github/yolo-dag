@@ -1,5 +1,5 @@
 ---
-description: Stop an in-flight yolo-dag run — halt further dispatch, stop this session's running pipeline agents, and leave the run directory in a cleanly resumable state.
+description: Stop an in-flight yolo-dag run — halt dispatch, stop this session's pipeline agents, and leave the run cleanly resumable.
 argument-hint: A run id (e.g. 2026-08-21-a3f9). Omit to target the most recent run.
 allowed-tools: ["Read", "Glob", "Bash", "Write", "ListAgents", "TaskStop"]
 ---

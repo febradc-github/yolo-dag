@@ -1,6 +1,6 @@
 ---
 name: spec-distiller
-description: Use this agent when the merged and reconciled spec is about to be handed to task-specialist in Phase 4, to compile it into a dense brief and then verify that brief against the full spec before it's used — meter's M12 Distill mechanism. Two distinct invocations, always in this order for one spec, both foreground (nothing else proceeds until each returns): "compile" mode (given the full spec, produce a brief plus a set of closed verification questions) and "verify" mode (given only the brief plus the compile pass's questions, answer them from the brief alone, blind to the full spec). Not for decomposing the spec into tasks (see task-specialist) and not for reviewing spec quality (see spec-reviewer).
+description: Phase 4: compile the merged spec into a dense brief and verify it against closed probe questions answered from the brief alone. Two modes, compile and verify, always separate spawns. Not decomposing the spec (task-specialist).
 model: haiku
 color: gray
 tools: ["Read", "Write"]

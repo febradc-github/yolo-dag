@@ -41,6 +41,22 @@ MAX_PHASE = 6
 # narrowest terminal worth supporting, and the hint is the only part of that line we control.
 PICKER_LINE_BUDGET = 80
 
+# The orchestrator's SKILL.md is loaded in full the moment the skill is invoked and
+# stays resident for the whole run, so it is re-paid on every context compaction. The
+# phase bodies live in phases/ and load on demand. This ceiling is what stops them
+# drifting back into the spine one paragraph at a time; it is ~5k tokens, against the
+# ~14k the unsplit file cost.
+SPINE_BYTE_BUDGET = 21000
+
+# Description text is loaded into *every* session in any repo where the plugin is
+# installed, whether or not it is ever used -- agent descriptions populate the Agent
+# tool's listing, skill descriptions the skill listing. It is the only part of this
+# plugin with an unconditional cost, so it gets an explicit ceiling rather than being
+# left to grow.
+MAX_AGENT_DESCRIPTION = 460
+MAX_SKILL_DESCRIPTION = 700
+MAX_COMMAND_DESCRIPTION = 280
+
 # The phase each agent declares via the literal "Phase N of the `orchestrator` skill"
 # sentence in its body. This table is the drift guard: the agent files were once written
 # against a 6-phase numbering the orchestrator had already abandoned, and nothing caught it.
@@ -258,12 +274,66 @@ def check_agents() -> dict[str, dict]:
     return agents
 
 
-def check_orchestrator(agents: dict[str, dict]) -> None:
-    path = ROOT / "skills" / "orchestrator" / "SKILL.md"
+def orchestrator_text() -> str:
+    """The orchestrator skill is progressively disclosed: SKILL.md is a spine
+    that loads `phases/phase-<n>.md` as it enters each phase, plus
+    `reference/*.md` for rules only some runs need. Every cross-file
+    invariant below is a property of the skill as a whole, so they are
+    checked against the concatenation -- splitting the file must not be a
+    way to smuggle a broken contract past this validator."""
+    parts = []
+    skill_dir = ROOT / "skills" / "orchestrator"
+    for path in [skill_dir / "SKILL.md",
+                 *sorted(skill_dir.glob("phases/*.md")),
+                 *sorted(skill_dir.glob("reference/*.md"))]:
+        try:
+            parts.append(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            fail(f"{path.relative_to(ROOT)}: {exc}")
+    return "\n".join(parts)
+
+
+def check_orchestrator_layout() -> None:
+    """The spine must stay a spine, and every phase it indexes must exist."""
+    skill_dir = ROOT / "skills" / "orchestrator"
+    spine = skill_dir / "SKILL.md"
     try:
-        text = path.read_text(encoding="utf-8")
+        spine_text = spine.read_text(encoding="utf-8")
     except OSError as exc:
         fail(f"skills/orchestrator/SKILL.md: {exc}")
+        return
+
+    for n in range(1, MAX_PHASE + 1):
+        phase_file = skill_dir / "phases" / f"phase-{n}.md"
+        if not phase_file.exists():
+            fail(f"skills/orchestrator/phases/phase-{n}.md: missing, but the spine's "
+                 f"dispatch table sends the orchestrator there")
+            continue
+        head = phase_file.read_text(encoding="utf-8").lstrip().splitlines()[:1]
+        if not head or not head[0].startswith(f"## Phase {n}"):
+            fail(f"skills/orchestrator/phases/phase-{n}.md: must open with "
+                 f"'## Phase {n} ...' so the phase numbering stays checkable")
+        if f"phases/phase-{n}.md" not in spine_text:
+            fail(f"orchestrator spine: never points at phases/phase-{n}.md, so that "
+                 f"phase is unreachable")
+
+    for ref in sorted(skill_dir.glob("reference/*.md")):
+        if f"reference/{ref.name}" not in spine_text:
+            fail(f"orchestrator spine: never points at reference/{ref.name}, so it is "
+                 f"dead weight on disk")
+
+    # The whole point of the split: the spine is what stays resident.
+    spine_bytes = len(spine_text.encode("utf-8"))
+    if spine_bytes > SPINE_BYTE_BUDGET:
+        fail(f"orchestrator spine is {spine_bytes} bytes, over the "
+             f"{SPINE_BYTE_BUDGET}-byte budget — it is loaded in full on every run and "
+             f"re-paid on every compaction. Move phase-specific detail into "
+             f"phases/, or run-conditional detail into reference/.")
+
+
+def check_orchestrator(agents: dict[str, dict]) -> None:
+    text = orchestrator_text()
+    if not text:
         return
 
     phases = {int(n) for n in re.findall(r"^## Phase (\d+)", text, re.MULTILINE)}
@@ -284,6 +354,52 @@ def check_orchestrator(agents: dict[str, dict]) -> None:
             head = contract.split(":")[0]
             if head not in text:
                 fail(f"orchestrator: never reads the `{head}` contract emitted by `{owner}`")
+
+
+def check_description_budgets(agents: dict[str, dict]) -> None:
+    """Guard the always-on cost. See MAX_AGENT_DESCRIPTION above."""
+    for path in sorted((ROOT / "agents").glob("*.md")):
+        data, _ = parse_frontmatter(path)
+        length = len(str(data.get("description", "")))
+        if length > MAX_AGENT_DESCRIPTION:
+            fail(f"{path.relative_to(ROOT)}: description is {length} chars, over the "
+                 f"{MAX_AGENT_DESCRIPTION}-char budget — it loads into every session "
+                 f"whether or not this plugin is used")
+    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+        data, _ = parse_frontmatter(path)
+        length = len(str(data.get("description", "")))
+        if length > MAX_SKILL_DESCRIPTION:
+            fail(f"{path.relative_to(ROOT)}: description is {length} chars, over the "
+                 f"{MAX_SKILL_DESCRIPTION}-char budget")
+    for path in sorted((ROOT / "commands").glob("*.md")):
+        data, _ = parse_frontmatter(path)
+        length = len(str(data.get("description", "")))
+        if length > MAX_COMMAND_DESCRIPTION:
+            fail(f"{path.relative_to(ROOT)}: description is {length} chars, over the "
+                 f"{MAX_COMMAND_DESCRIPTION}-char budget")
+
+
+def check_cost_reduction_scripts() -> None:
+    """Phase 2 branches on two scripts' exit codes. A renamed or deleted script
+    would make the orchestrator fall back to the agent forever -- correct, but
+    silently un-saving everything this version exists to save."""
+    text = orchestrator_text()
+    for script, module in (("dag-fold.py", "meter/fold.py"),
+                           ("dag-gauge.py", "meter/gauge.py"),
+                           ("dag-distill.py", "meter/distill.py")):
+        if not (ROOT / "scripts" / script).exists():
+            fail(f"scripts/{script}: missing, but the orchestrator invokes it")
+        if not (ROOT / module).exists():
+            fail(f"{module}: missing, but scripts/{script} imports it")
+        if script not in text:
+            fail(f"orchestrator: never invokes scripts/{script}, which is then dead code")
+
+    from_defaults = ROOT / "meter" / "config.py"
+    config_text = from_defaults.read_text(encoding="utf-8")
+    for module in ("fold", "gauge"):
+        if f'"{module}"' not in config_text:
+            fail(f"meter/config.py: no `{module}` entry in DEFAULTS['modules'], so the "
+                 f"script that reads it can never be enabled")
 
 
 def check_commands() -> None:
@@ -590,7 +706,10 @@ def check_skills() -> None:
 def main() -> int:
     check_manifests()
     agents = check_agents()
+    check_orchestrator_layout()
     check_orchestrator(agents)
+    check_cost_reduction_scripts()
+    check_description_budgets(agents)
     check_commands()
     check_skills()
     check_mode_tables()

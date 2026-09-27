@@ -1,5 +1,5 @@
 ---
-description: Turn the current project directory's statusline on or off, or check whether it's currently configured.
+description: Install or remove yolo-dag's statusline, which reports live run and spend state.
 argument-hint: on | off | status
 allowed-tools: ["Bash"]
 ---

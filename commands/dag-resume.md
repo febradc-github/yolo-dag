@@ -1,5 +1,5 @@
 ---
-description: Resume an interrupted yolo-dag run from its persisted state, re-entering at the first phase run.json does not mark complete instead of starting over. Also how a plan-only run parked at the implementation boundary gets executed once the user has reviewed the plan.
+description: Resume an interrupted yolo-dag run from its persisted state, re-entering at the first incomplete phase instead of starting over. Also how a plan-only run parked at the implementation boundary gets executed once the plan is reviewed.
 argument-hint: A run id (e.g. 2026-08-21-a3f9). Omit to resume the most recent unfinished run.
 allowed-tools: ["Read", "Glob", "Bash", "Write", "Skill", "Agent", "SendMessage"]
 ---

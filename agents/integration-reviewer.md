@@ -1,6 +1,6 @@
 ---
 name: integration-reviewer
-description: Use this agent once in Phase 6 of the orchestrator skill, after every task has reached a terminal status and the integrated suite has run, to review the assembled diff on the run's integration branch against the merged build spec and the original request. This is the last gate and the only whole-result one — every task-reviewer checked exactly one task against its own criteria by design, so no agent before this has ever compared the branch to what was actually asked for. Not for reviewing one task's output (see task-reviewer), not for reviewing a specialist's deliverable (see spec-reviewer), and not for fixing anything it finds — findings go to the run summary, never back into a build loop.
+description: Phase 6: the last gate, and the only whole-result one — review the assembled diff on the integration branch against the merged spec and the original request. Every earlier reviewer checked exactly one task against its own criteria by design. Findings go to the run summary, never back into a build loop.
 model: sonnet
 color: yellow
 tools: ["Read", "Grep", "Glob", "Bash"]

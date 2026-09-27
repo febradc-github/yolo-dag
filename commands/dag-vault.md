@@ -1,5 +1,5 @@
 ---
-description: Report meter's Vault (M5) stats — entries, disk usage, and shadow-mode agreement rate — or purge it under its size cap. Vault is shadow-mode only; it never applies a cached patch.
+description: Inspect meter's Vault — the semantic patch cache that shadow-checks completed task work against previously seen equivalents.
 argument-hint: stats | purge
 allowed-tools: ["Bash"]
 ---

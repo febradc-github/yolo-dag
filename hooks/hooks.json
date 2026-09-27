@@ -1,5 +1,5 @@
 {
-  "description": "meter (v1 M0-M6 + ALL of v2 R1-R4: M9/M13/M15/M11/M12/M14/M10/M8 — M10 and M8 built+tested but disabled by default, see README.md's Meter section and meter-handoff.md / meter-v2-handoff.md for exact scope per milestone): measures per-node token spend, caps receipt-shaped node output, precomputes and delivers per-task context packs (with file-path interning inside them, meter/intern.py), bounds oversized reads, compresses oversized Bash/Grep output, measures cross-agent text duplication, shadow-checks completed work against a semantic patch cache, recalibrates per-agent-type cost weights, contains runaway nodes via a tool-call-count proxy, denies wasteful full-file rewrites, caches repeated Grep answers within a run, and injects a deterministic-checks declaration into a task-reviewer's prompt before it starts (meter/sieve.py). SessionStart boots the daemon; SubagentStart/SubagentStop attribute tokens, deliver a dossier's additionalContext, validate the trailing dag-receipt block (one repair turn on a miss, per meter/receipts.py), and shadow-check the Vault; PreToolUse has FOUR entries — Agent (correlates a spawn to its DAG-NODE marker, builds that spawn's dossier, and — for a task-reviewer spawn specifically, only when WORKTREE:/COMMIT: lines parse cleanly — rewrites its prompt with Sieve's declaration; this is the single highest-blast-radius rewrite in this plugin, deliberately conservative, see meter/router.py's _maybe_run_sieve), Read/Grep/Glob (dossier enforcement, Clamp 3a bounded reads, and Oracle's Grep cache lookup — meter/dossier.py, meter/clamp.py, meter/oracle.py), Write (Throttle's deny-full-rewrite check, meter/throttle.py), and a matcher-less entry firing on every tool call for Governor's runaway-containment counter (meter/governor.py, a materially larger surface than the others, called out in scripts/dag-doctor.py) — each tool is matched by exactly one of these, precisely to avoid the documented updatedInput/multiple-matcher hazard (meter-handoff.md Section 6.2); PostToolUse matches Bash/Grep/Write/Edit for output compression, Oracle answer recording, and Oracle invalidation-on-write; SessionEnd handles main-thread accounting, weight recalibration, and daemon refcounting. Attribution (M14) piggybacks on the Agent/SubagentStop handlers already described above with no new hook surface — it records dossier-section exposure and reference, measurement only, never enforced (meter/attribution.py); Distill (M12) has no hook surface at all, living entirely in scripts/dag-distill.py and skills/orchestrator/SKILL.md's Phase 4, since only the orchestrator can make the model call it needs. Pull (M10) also piggybacks on the same Agent/SubagentStart/Read handlers, gated behind meter.modules.pull.enabled (default false — the spec's own release plan gates it on M14 evidence that doesn't exist yet): when enabled it splits a dossier into per-section files and injects a manifest instead of the pushed body, tracking pulls via a Read on one of those files. Quorum (M8) has no hook surface at all — it's a one-sentence, inert-by-default addition to skills/orchestrator/SKILL.md's Phase 2 plus a daemon-side measurement table (meter/quorum.py) nothing currently writes to outside real runs, gated behind meter.modules.quorum.enabled (default false, per the spec's own 'Release R4, alone' instruction). Only v1's M7 (Codemod) remains unimplemented, per that spec's own permission to skip it. Auth token header: works only if DAG_METER_TOKEN is exported in the shell that launches Claude Code, matching the value at ${CLAUDE_PLUGIN_DATA}/meter/token (see meter/daemon.py's module docstring for why a SessionStart hook can't set this for you). Requests without it are still processed — see the same docstring for why that's safe.",
+  "description": "meter: local, zero-network token accounting and cost reduction for yolo-dag. SessionStart boots the daemon; SubagentStart/Stop attribute spend, deliver context packs, and validate receipts; PreToolUse has four non-overlapping entries (Agent, Read|Grep|Glob, Write, and a matcher-less Governor counter) \u2014 deliberately non-overlapping to avoid the documented updatedInput/multiple-matcher hazard; PostToolUse compresses oversized output and maintains the Grep cache; SessionEnd does main-thread accounting and daemon refcounting. Per-module scope, defaults, and the reasoning behind each one live in meter/config.py and each module's docstring; the milestone specs are meter-handoff.md and meter-v2-handoff.md. Auth: export DAG_METER_TOKEN matching ${CLAUDE_PLUGIN_DATA}/meter/token; requests without it are still processed (see meter/daemon.py for why that is safe).",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,9 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/meter-boot.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/meter-boot.py"
+            ],
             "timeout": 20
           }
         ]
@@ -20,8 +22,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/subagent/start",
             "timeout": 10,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       }
@@ -34,8 +40,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/tool/pre-agent",
             "timeout": 10,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       },
@@ -46,8 +56,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/tool/pre-dossier",
             "timeout": 5,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       },
@@ -58,8 +72,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/tool/pre-throttle",
             "timeout": 5,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       },
@@ -69,8 +87,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/tool/pre-governor",
             "timeout": 5,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       }
@@ -83,8 +105,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/tool/post",
             "timeout": 5,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       }
@@ -96,8 +122,12 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/subagent/stop",
             "timeout": 20,
-            "headers": { "X-Dag-Meter-Token": "$DAG_METER_TOKEN" },
-            "allowedEnvVars": ["DAG_METER_TOKEN"]
+            "headers": {
+              "X-Dag-Meter-Token": "$DAG_METER_TOKEN"
+            },
+            "allowedEnvVars": [
+              "DAG_METER_TOKEN"
+            ]
           }
         ]
       }
@@ -108,7 +138,10 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/meter-hook.py", "sessionend"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/meter-hook.py",
+              "sessionend"
+            ],
             "timeout": 10
           }
         ]

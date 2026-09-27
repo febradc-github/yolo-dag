@@ -1,5 +1,5 @@
 ---
-description: Turn meter on or off, or check whether it's currently running — meter is on by default; this is the opt-out (and opt-back-in) switch.
+description: Show or toggle meter, yolo-dag's local token-accounting and cost-reduction subsystem.
 argument-hint: on | off | status
 allowed-tools: ["Bash"]
 ---

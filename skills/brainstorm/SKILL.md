@@ -1,6 +1,6 @@
 ---
-description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only run or a full run, how much scrutiny it should get (mode), and whether to force all specialists, then turns a raw, possibly ambiguous request into a fully-specified one through a real back-and-forth with the user via AskUserQuestion, with zero tolerance for gaps in understanding the problem (implementation minutiae are still resolved autonomously), presents its finalized understanding in plain language with an optional generated HTML visual, then hands off to the orchestrator skill to actually build it.
-argument-hint: Request [mode=lite|full|micro] [--all] [--plan-only]
+description: Entrypoint for the yolo-dag plugin — asks up front whether this is a plan-only or full run and how much scrutiny it should get, then turns a raw, ambiguous request into a fully-specified one through a real back-and-forth, with zero tolerance for gaps in understanding the problem (implementation minutiae are still resolved autonomously), and hands off to the orchestrator skill to build it.
+argument-hint: Request [mode=auto|lite|full|micro] [--all] [--plan-only]
 ---
 
 # /brainstorm — Resolve the Request, Then Hand Off
@@ -28,6 +28,9 @@ already answers it; otherwise ask via `AskUserQuestion`.
    > - **Full run** — continue into implementation
 
    > **How much scrutiny should this run get?**
+   > - **Auto** (recommended) — size it to the request. Picks micro for a self-contained
+   >   one-file change, full for anything touching auth, data, money or untrusted input, and
+   >   lite for everything in between.
    > - **Full** — every routed specialist, up to 3 review rounds each. For real features, anything
    >   touching architecture or data, anything you'd want a second opinion on.
    > - **Lite** — routing capped at 4 specialists, 1 review round. For small, well-understood work
@@ -36,10 +39,15 @@ already answers it; otherwise ask via `AskUserQuestion`.
    >   that's already fully specified by its own one-sentence statement — a typo, a rename, a
    >   config value.
 
+   **Offer `Auto` first and treat it as the default.** The three fixed tiers make the user guess
+   at a cost they can't see yet; `auto` resolves against the request itself, in the orchestrator,
+   with no model call and no extra spawn, and says out loud which way it went. A user who wants a
+   specific tier can still pick one, and a passed `mode=` flag always wins.
+
    Skip the run-type question only when `--plan-only` or `--full-run` is present — the flag *is*
    the answer. **The two are mutually exclusive**; if both are present, stop immediately and say
-   so rather than picking one. Skip the mode question only when `mode=full`, `mode=lite`, or
-   `mode=micro` is present.
+   so rather than picking one. Skip the mode question only when `mode=auto`, `mode=full`,
+   `mode=lite`, or `mode=micro` is present.
 
 2. **Force all specialists**, asked next — only when the resolved mode (from the flag or the
    answer above) is `full` or `lite`, never `micro` (which has no specialist phase), and only when
@@ -164,10 +172,18 @@ non-interactive fallback:
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Soft spawn budget | 120 units | 40 units | 8 units |
+| Soft spawn budget | 90 units | 30 units | 6 units |
+
+`auto` is not a fourth column — it resolves to one of these three in the orchestrator, before
+anything is spawned, and the resolved mode is what lands in `run.json`.
 
 The mode sizes scrutiny and spend only. How many tasks run in parallel at once is set by the run
 type (3 per pass in a full run, uncapped in a plan-only run), not by the mode.
+
+The budgets above are lower than they were before v0.16.0 because two steps that used to cost a
+spawn each no longer do: Phase 2 consolidates with a script wherever it provably can, and sizes
+its reviewer count to the deliverable. The ceilings moved down with the real spend so that
+crossing one still means something.
 
 Whichever way mode and `--all` were resolved — flag or answer — strip them from the request text
 you restate, including `--tasks-per-pass`'s number, so none of it leaks into the specialists'

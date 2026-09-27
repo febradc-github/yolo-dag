@@ -1,5 +1,5 @@
 ---
-description: Clean up after yolo-dag runs — prune stale worktrees, remove finished runs' state directories, and (only with confirmation) delete their dag/* integration branches.
+description: Clean up after yolo-dag runs — prune stale worktrees, remove finished runs' state, and (only with confirmation) delete their dag/* branches.
 argument-hint: A run id to clean one run, or --all to clean every finished run. Never touches an in-flight run.
 allowed-tools: ["Read", "Glob", "Bash", "AskUserQuestion"]
 ---

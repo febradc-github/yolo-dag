@@ -1,5 +1,5 @@
 ---
-description: Show the detailed status of one yolo-dag run — phase reached, specialist roster, task graph progress, spend against budget, open concerns, and integration outcome.
+description: Detailed status of one yolo-dag run — phase reached, specialists, task graph progress, spend against budget, open concerns, integration outcome.
 argument-hint: A run id (e.g. 2026-08-21-a3f9). Omit to use the most recent run.
 allowed-tools: ["Read", "Glob", "Bash"]
 ---

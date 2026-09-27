@@ -1,5 +1,5 @@
 ---
-description: List past yolo-dag pipeline runs found under .dag/runs/, newest first, with each one's mode, phase reached, and outcome.
+description: List past yolo-dag runs, newest first, with each one's mode, phase reached, and outcome.
 argument-hint: (no arguments)
 allowed-tools: ["Read", "Glob", "Bash"]
 ---

@@ -183,7 +183,14 @@ therefore what it costs. A run is `full`, `lite`, or `micro`:
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Soft spawn budget | 120 units | 40 units | 8 units |
+| Soft spawn budget | 90 units | 30 units | 6 units |
+
+`auto` is a fourth thing you can pass, but it is not a fourth tier — it resolves to one of the
+three above, in the orchestrator, before anything is spawned, using only the request text: `micro`
+for a self-contained one-file change, `full` for anything touching auth, user data, secrets, money
+or untrusted input (or spanning enough of the system that two specialists could contradict each
+other), and `lite` for everything else, which is most requests. The run says which way it resolved
+and why, in one line, and `run.json` records the resolved mode, never the literal `auto`.
 
 The mode does not set concurrency — how many tasks run at once is asked per pass, capped by the
 run type.
@@ -195,7 +202,7 @@ request text before the specialists see it. The first line below is the argument
 slash-command picker shows; the rest are real invocations.
 
 ```
-/brainstorm Request [mode=lite|full|micro] [--all] [--plan-only|--full-run]
+/brainstorm Request [mode=auto|lite|full|micro] [--all] [--plan-only|--full-run]
 
 /brainstorm mode=micro fix the typo in the onboarding email copy
 /brainstorm mode=lite add a --json flag to the export command, matching the existing --csv one
@@ -264,8 +271,9 @@ stakes that the request text doesn't carry, and an explicit flag always beats th
 judgment.
 
 There is no separate "default" mode to memorize: unflagged runs get whichever of the three fits.
-(The one asymmetry: invoking the `orchestrator` skill directly with no mode at all falls back to
-`full` — over-reviewing costs money, under-reviewing costs correctness.)
+Invoking the `orchestrator` skill directly with no mode at all now resolves `auto` the same way,
+rather than falling back to `full` — the old fallback over-reviewed every direct invocation,
+including the small ones.
 
 ### Budget degradation
 
@@ -348,6 +356,79 @@ run, at the same depth. It only changes how a deliverable travels once a decisio
 Deliverable depth is still expected to track the request's actual complexity (a single-file,
 client-only page doesn't need enterprise-scale documentation regardless of how it's transported) —
 that's a separate, complementary discipline, not something this mechanism enforces on its own.
+
+## What this costs, and what v0.16.0 did about it
+
+A pipeline that spawns this many agents has three separate token costs, and they respond to
+completely different fixes.
+
+**1. The always-on cost — paid even when you never run it.** Agent and skill descriptions load
+into every session in any repo where the plugin is installed, because that is how the model
+knows what it could invoke. This plugin's descriptions had grown to ~16,300 characters (~4,100
+tokens) of prose, charged to every session whether or not a single yolo-dag command ran. They are
+now ~7,900 (**52% smaller**), and `scripts/validate.py` enforces a per-description ceiling so
+they cannot drift back — this is the one cost with no opt-out, so it gets a hard limit rather
+than good intentions.
+
+**2. The resident cost — paid once per run, then again after every compaction.** The
+`orchestrator` skill was a single 55 KB file (~14,000 tokens) loaded in full the moment the skill
+was invoked and pinned for all six phases. A `micro` run, whose entire purpose is to be cheap,
+paid in full for the Phase 1–3 prose it then skipped. It is now a 19 KB **spine** that carries
+run setup, the ground rules, the budget and a phase index, and loads each phase body from
+`skills/orchestrator/phases/phase-<n>.md` at the moment it enters that phase — plus
+`reference/unattended.md` and `reference/resume.md`, which only runs that actually use those
+flags ever read. **65% off** what stays resident, and a validator budget keeps it there.
+
+**3. The spawn cost — the one that actually dominates a full run.** Phase 2 spawned a *constant*
+3 reviewers plus 1 consolidator, per specialist, per round: up to 96 agents in a `full` run,
+each re-reading the same deliverable and the same request. Two new meter modules make that
+number a function of the work instead of a constant:
+
+- **Fold** (`meter/fold.py`, `scripts/dag-fold.py`) replaces the `spec-consolidator` spawn with
+  a computation. Consolidation is a dedupe-and-rank of pre-scored, pre-structured records —
+  `agents/spec-consolidator.md` calls it "a mechanical merge" itself — so Fold parses the finding
+  files, merges paraphrases of the same defect (stem-folded Jaccard, with corroboration recorded
+  and **both** phrasings kept, so a wrong merge is recoverable rather than lossy), ranks the
+  survivors, and writes the same file the agent would have. That is **24 spawns per full run
+  down to zero** on the common path.
+
+  What it deliberately does *not* do is decide a disagreement. The consolidator's contract says
+  to preserve genuine conflicts rather than pick a side, and that is semantic. So Fold detects
+  the *conditions* for one — two findings about the same subject proposing opposite fixes, or a
+  finding file it cannot parse — and **escalates the whole round to the real agent, unchanged**.
+  The cheap path runs only where it is provably safe; everything else falls through to the model.
+
+- **Gauge** (`meter/gauge.py`, `scripts/dag-gauge.py`) sizes the reviewer count to the
+  deliverable, from signals available before any model runs: domain risk, round number, whether
+  the previous round found anything, hedge density, and length. A first-draft auth design still
+  gets three reviewers; a 400-word research note on round three, after two clean rounds, gets
+  one. It can also fold several angles into a single spawn for a small, low-risk deliverable,
+  where three agents re-reading the same few hundred words costs more than their independence
+  buys.
+
+  **Gauge only ever reduces.** It cannot exceed the mode's ceiling, `--all` always forces the
+  full panel, and a high-risk domain (`security-specialist`, `data-schema-specialist`) on its
+  first round always gets three reviewers whatever else it scores. On any failure it prints the
+  unmodified constant, so a broken script costs you the saving and nothing else.
+
+  This is *not* the same mechanism as the still-disabled M8 Quorum, which narrows review only
+  after measuring 50+ full-quorum runs per domain — a bar this plugin cannot clear before it has
+  that history. Gauge needs no history: it reads the artifact in front of it.
+
+Across a `full` run with all 8 specialists at 3 rounds, Phase 2 goes from **96 spawns to ~40
+(58% fewer)**. The mode budgets moved down with it — 120/40/8 units to 90/30/6 — so crossing a
+ceiling still means something.
+
+Both modules are **on by default**, unlike M8 and M10. They need no measurement campaign to be
+safe: Fold escalates to the real agent whenever its path isn't provably correct, and Gauge only
+ever reduces from a ceiling it cannot raise. Disable either in `.dag/meter.json`:
+
+```json
+{ "modules": { "fold": { "enabled": false }, "gauge": { "enabled": false } } }
+```
+
+Setting `meter.modules.gauge.min_reviewers` raises Gauge's floor if you want more scrutiny than
+it picks.
 
 ## Meter (on by default, measurement only)
 
@@ -592,6 +673,9 @@ yolo-dag/
 ├── skills/
 │   ├── brainstorm/              # entrypoint — asks the run type, resolves ambiguity, hands off
 │   └── orchestrator/            # route, review loops, merge+reconcile, decompose, execute, integrate
+│       ├── SKILL.md             #   the spine: run setup, ground rules, budget, phase index
+│       ├── phases/phase-1..6.md #   phase bodies, loaded on demand as each phase is entered
+│       └── reference/           #   unattended.md, resume.md — read only by runs that need them
 ├── commands/
 │   ├── dag-runs.md              # list past runs
 │   ├── dag-status.md            # inspect one run in detail
@@ -602,7 +686,7 @@ yolo-dag/
 │   ├── dag-meter.md             # turn meter on/off, or check whether it's running
 │   └── dag-vault.md             # Vault (M5) stats and purge, shadow-mode agreement rate
 ├── hooks/hooks.json              # meter's Claude Code hook registration (v1 M0-M6 + v2 R1 + M11)
-├── meter/                        # meter's package — v1: M0 (Ledger) + M1 (Receipts) + M2 (Dossier) + M3 (Clamp, both halves) + M4 (Echo, measure-only) + M5 (Vault, shadow mode only) + M6 (Governor, 6b via a call-count proxy); v2 (meter-v2-handoff.md, ALL of R1-R4 implemented): M9 (Intern) + M13 (Throttle) + M15 (Oracle) + M11 (Sieve) + M12 (Distill, cache only) + M14 (Attribution, measure-only) + M10 (Pull, disabled by default) + M8 (Quorum, disabled by default)
+├── meter/                        # meter's package — v1: M0 (Ledger) + M1 (Receipts) + M2 (Dossier) + M3 (Clamp, both halves) + M4 (Echo, measure-only) + M5 (Vault, shadow mode only) + M6 (Governor, 6b via a call-count proxy); v2 (meter-v2-handoff.md, ALL of R1-R4 implemented): M9 (Intern) + M13 (Throttle) + M15 (Oracle) + M11 (Sieve) + M12 (Distill, cache only) + M14 (Attribution, measure-only) + M10 (Pull, disabled by default) + M8 (Quorum, disabled by default); v3: M16 (Fold) + M17 (Gauge), both on by default — see "What this costs" above
 ├── agents/
 │   ├── design-specialist.md
 │   ├── architecture-specialist.md
@@ -627,6 +711,8 @@ yolo-dag/
     ├── dag-meter.py              # meter's on/off/status CLI, behind /dag-meter
     ├── dag-vault.py              # meter's Vault stats/purge CLI, behind /dag-vault
     ├── dag-distill.py            # meter's M12 Distill brief cache CLI, called from Phase 4 (no slash command — orchestrator-internal)
+    ├── dag-fold.py               # meter's M16 Fold — consolidates a review round in code; exit 2 means "spawn the agent instead"
+    ├── dag-gauge.py              # meter's M17 Gauge — sizes a review round's reviewer count; always exit 0, prints the constant on failure
     ├── meter-boot.py             # meter's SessionStart hook (starts/refcounts the daemon)
     └── meter-hook.py             # meter's SessionEnd hook (main-thread accounting, refcounting)
 ```

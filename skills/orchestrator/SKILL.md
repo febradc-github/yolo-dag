@@ -1,25 +1,54 @@
 ---
-description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally handed off from the brainstorm skill), routes it to the relevant domain specialists, runs each through a 3-reviewer/1-consolidator review loop, merges and reconciles the results into one build spec, decomposes it into a task DAG of independent tasks bound by shared contracts, then enters implementation directly on a full run, or stops at the implementation boundary and asks first on a plan-only run — executing that DAG in user-paced passes of worktree-isolated workers, asking only how many tasks to run in parallel each pass and picking the tasks itself, waiting for every task in a pass to be reviewed and done before asking again — then verifies and acceptance-reviews the assembled branch. Persists every phase to .dag/runs/<run-id>/ (including a machine-readable run.json) so an interrupted run can resume.
-argument-hint: Request [mode=lite|full|micro] [--all] [--plan-only]
+description: Orchestrator for the yolo-dag plugin — takes a fully-specified request (normally from the brainstorm skill), routes it to the specialists whose domains apply, closes each with an adversarial review loop, reconciles them into one build spec, decomposes that into a task DAG, then executes it in user-paced passes of worktree-isolated workers — entering implementation directly on a full run, or stopping to ask on a plan-only run — and finally verifies and acceptance-reviews the assembled branch. Phase bodies load on demand from phases/; every phase persists to .dag/runs/<run-id>/ so an interrupted run resumes.
+argument-hint: Request [mode=auto|lite|full|micro] [--all] [--plan-only]
 ---
 
 # orchestrator — Route, Review, Reconcile, Decompose, Execute, Integrate
 
-You receive a request that has already been resolved to zero high-stakes ambiguity — normally
-handed off by the `brainstorm` skill, whose restated request and stated assumptions you should
-treat as ground truth; don't re-litigate them. Take it through six phases: route it to the
-specialists whose domains actually apply, let each survive an adversarial review loop, merge and
-reconcile them into one build spec, decompose that spec into a task DAG, then execute that DAG in
-user-paced passes of worktree-isolated workers — asking before each pass only *how many* tasks to
-run in parallel and choosing the tasks yourself, merging each passing task onto the run's
-integration branch as its pass resolves — then verify and acceptance-review the assembled branch.
+You receive a request already resolved to zero high-stakes ambiguity — normally handed off by
+the `brainstorm` skill, whose restated request and stated assumptions are ground truth; don't
+re-litigate them. Take it through six phases: route it to the specialists whose domains apply,
+let each survive an adversarial review loop, merge and reconcile them into one build spec,
+decompose that into a task DAG, then execute that DAG in user-paced passes of worktree-isolated
+workers — asking before each pass only *how many* tasks to run in parallel and choosing the tasks
+yourself, merging each passing task onto the run's integration branch — then verify and
+acceptance-review the assembled branch.
 
-Whether the user is asked before implementation starts is set by the **run type**, decided in
-`brainstorm` before this skill was invoked: a *full run* enters implementation with no
-confirmation; a *plan-only* run stops at the implementation boundary and starts nothing until the
-user says go.
+Whether the user is asked before implementation starts is the **run type**, decided in
+`brainstorm`: a *full run* enters implementation with no confirmation; a *plan-only* run stops at
+the implementation boundary until the user says go.
 
 Input: $ARGUMENTS
+
+## This file is the spine; the phases load on demand
+
+**The phase bodies are not in this file.** Each lives in `phases/phase-<n>.md` beside it. Read a
+phase's file at the moment you enter that phase, and not before — the six of them together are
+four times the size of this spine, and a run that skips phases (every `micro` run skips 1–3)
+or dies at Phase 2 should never have paid for the rest.
+
+Resolve `<skill-dir>` the same way Phase 4 resolves `dag-distill.py`:
+`${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/`, falling back to searching `~/.claude/plugins` for a
+`yolo-dag` checkout, falling back to `skills/orchestrator/` relative to the current directory.
+
+| Entering | Read first | Skipped when |
+|---|---|---|
+| Phase 1 — Route & fan out | `<skill-dir>/phases/phase-1.md` | `micro` |
+| Phase 2 — Build + review loop | `<skill-dir>/phases/phase-2.md` | `micro` |
+| Phase 3 — Merge & reconcile | `<skill-dir>/phases/phase-3.md` | `micro` |
+| Phase 4 — Decompose into a task DAG | `<skill-dir>/phases/phase-4.md` | never |
+| Phase 5 — Execute, verify & merge | `<skill-dir>/phases/phase-5.md` | plan-only run, until resumed |
+| Phase 6 — Verify & hand off | `<skill-dir>/phases/phase-6.md` | never |
+
+**`micro` mode never opens phases 1–3, so their work is stated here in full**: write
+`routing.md` noting "micro — no specialists; the request is the spec", copy the request verbatim
+into `merged-spec.md`, mark phases 1–3 `"skipped"` in `run.json`, and go straight to Phase 4.
+That is the entirety of what those three phases do in `micro` mode — there is nothing in their
+files you are missing.
+
+Read each phase file exactly once, when you reach it. If a phase file can't be found, say so and
+stop rather than improvising that phase from this summary — the summaries above are an index, not
+a specification.
 
 ## Run setup — do this first
 
@@ -42,19 +71,34 @@ Input: $ARGUMENTS
    `dag/<run-id>` somehow already exists, pick a new hex suffix.
 3. **Create the run directory** `.dag/runs/<run-id>/` and write `request.md` containing the
    verbatim request plus `brainstorm`'s stated assumptions.
-4. **Determine the mode, the run type, and the flags.** Parse `$ARGUMENTS` for `mode=full`,
-   `mode=lite`, `mode=micro`, `--all`, `--plan-only`, `--full-run`, `--non-interactive`, and
-   `--tasks-per-pass N`. With no mode flag, use whatever mode `brainstorm` chose in its handoff,
-   and fall back to `full` if you were invoked directly with no mode at all. `--all` forces all
-   8 specialists and is incompatible with `micro` (which has no specialists) — if both are
-   passed, run as `lite` and say so in one line.
+4. **Determine the mode, the run type, and the flags.** Parse `$ARGUMENTS` for `mode=auto`,
+   `mode=full`, `mode=lite`, `mode=micro`, `--all`, `--plan-only`, `--full-run`,
+   `--non-interactive`, and `--tasks-per-pass N`. With no mode flag, use whatever mode
+   `brainstorm` chose in its handoff, and fall back to **`auto`** if you were invoked directly
+   with no mode at all. `--all` forces all 8 specialists and is incompatible with `micro` (which
+   has no specialists) — if both are passed, run as `lite` and say so in one line.
 
-   The **run type** is a separate axis from the mode: `--plan-only` (or a handoff saying the user
-   picked a plan-only run) sets `plan_only: true`; `--full-run` (or a handoff saying the user
-   picked a full run) sets `plan_only: false`. **The two flags are mutually exclusive** — if both
-   are passed, stop immediately and say so plainly; do not pick a precedence. Never ask the user
-   for the run type here — `brainstorm` already did, as its first action, and re-asking is exactly
-   the checkpoint this pipeline removed.
+   **`auto` is a selector, not a fourth tier.** It resolves to one of the three real modes before
+   anything else happens, using only the request in front of you — no model call, no extra spawn:
+
+   - **`micro`** — a single, self-contained change whose shape is already fully determined by the
+     request: one file or one obvious pair of files, no new dependency, no persistence or auth
+     surface, nothing another specialist would have an opinion about. A typo, a version bump, a
+     flag rename, "add a `--json` flag to this command".
+   - **`full`** — the request touches auth, user or sensitive data, secrets, money, or untrusted
+     input; *or* it spans enough of the system that two specialists could reasonably contradict
+     each other. Scrutiny is cheap next to the cost of getting these wrong.
+   - **`lite`** — everything else, which is most requests.
+
+   Resolve it, record the resolved mode in `run.json` (never the literal `auto`), and **say which
+   way it resolved and why, in one line** — "auto → lite: multi-file feature, no auth or
+   persistence surface". If the user disagrees they can re-run with an explicit mode; don't ask.
+
+   The **run type** is a separate axis: `--plan-only` (or a handoff saying so) sets
+   `plan_only: true`; `--full-run` sets `plan_only: false`. **The two flags are mutually
+   exclusive** — if both are passed, stop immediately and say so plainly; do not pick a
+   precedence. Never ask the user for the run type here — `brainstorm` already did, as its first
+   action, and re-asking is exactly the checkpoint this pipeline removed.
 
    **`run.json`'s `plan_only` is where the run type lives from this point on.** Both places that
    branch on it — the Phase 4 implementation boundary and Phase 5's per-pass cap — re-read it from
@@ -62,46 +106,18 @@ Input: $ARGUMENTS
    context compactions, and a forgotten run type silently turns a plan-only run into an unattended
    build.
 
-   **Unattended runs.** Two more flags let a caller with no user attached — an eval runner, a
-   scripted invocation — pre-answer this pipeline's two standing questions instead of hanging on
-   them:
-
-   - **`--non-interactive`** declares that no user is attached. It is **explicit and never
-     inferred** — not from a missing TTY, not from how the request reads, not from a question
-     going unanswered. Record it as `non_interactive: true` in `run.json`.
-   - **`--tasks-per-pass N`** pre-answers Phase 5's per-pass question with `N`, for every pass in
-     the run. Record it as `tasks_per_pass: N`.
-
-   Validate these at startup, before creating a branch or spawning anything, and **stop with a
-   plain error** rather than proceeding:
-
-   - `--tasks-per-pass` without `--non-interactive` → refuse, and say why: in an interactive run
-     the per-pass question is a review checkpoint the user is entitled to, and this flag is not a
-     way around it.
-   - `--non-interactive` without a run type (`--plan-only` or `--full-run`) → refuse: the run
-     would walk straight into the opening question with nobody there to answer it, which is the
-     failure this mode exists to prevent.
-   - `--non-interactive` without `--tasks-per-pass` → refuse, **including on a plan-only run**,
-     which parks before Phase 5 and never asks the question itself. The number is run state, not
-     an answer to one prompt: `run.json` carries it into the pass that `/dag-resume` eventually
-     runs, and requiring it here is what lets that resume proceed unattended without a second
-     flag of its own. Set once at setup, used whenever the run reaches Phase 5.
-   - `N` above the run type's cap — **3 on a full run**; a plan-only run has no cap — → refuse and
-     name the cap. Never silently clamp a pre-answered number. (`N` larger than the number of
-     eligible tasks is not an error: Phase 5 runs the eligible subset exactly as it would for a
-     typed answer.)
-   - `N` that is not a whole number ≥ 1 → refuse.
-
-   Non-interactive mode changes *where the two answers come from*, and nothing else. The plan is
-   still reported, the pass barrier is still a barrier, dependency rules still decide what is
-   eligible, and the per-pass structure is identical.
+   **If, and only if, `--non-interactive` or `--tasks-per-pass` is present**, read
+   `<skill-dir>/reference/unattended.md` and apply its validation rules before creating a branch
+   or spawning anything. Neither flag is ever inferred — not from a missing TTY, not from how the
+   request reads, not from a question going unanswered — so a run without them never needs that
+   file.
 
 | | `full` | `lite` | `micro` |
 |---|---|---|---|
 | Phases | all six | all six | 4–6 only |
 | Specialists | all routing selects | routing, capped at 4 | none — the request is the spec |
 | Review rounds | up to 3 | 1 | none |
-| Soft spawn budget | 120 units | 40 units | 8 units |
+| Soft spawn budget | 90 units | 30 units | 6 units |
 
 The mode sizes scrutiny and spend. It does *not* set concurrency: how many tasks run in parallel
 is asked per pass in Phase 5, capped at 3 in a full run and uncapped in a plan-only run.
@@ -139,94 +155,76 @@ is asked per pass in Phase 5, capped at 3 in a full run and uncapped in a plan-o
 6. **Tell the user the run id and where state is going**, in one line, then proceed. They can
    resume with `/dag-resume <run-id>` if the run is interrupted.
 
-**If this is a resume** (the orchestrator was invoked by `/dag-resume` with an existing run id):
-read `run.json` first and re-enter at the first phase not marked `"complete"` (or `"skipped"`).
-Never redo a phase whose entry is complete. Three extra rules on resume: re-validate `tasks.json`
-(uniqueness, edges, acyclicity) before executing anything — state on disk can have been
-hand-edited or corrupted since it was written; treat the integration branch as authoritative
-for what has merged, so if `tasks.json` claims a task is MERGED but the branch is missing, flag
-the inconsistency and stop rather than guessing; and downgrade Phase 4's file-ownership and
-contract checks to warnings here — the `task-specialist` that could fix them is a dead spawn from
-another session, and refusing to resume over a graph you can't get corrected helps nobody. Never
-run two tasks with overlapping ownership in the same pass regardless.
+**If this is a resume** (invoked by `/dag-resume` with an existing run id), read
+`<skill-dir>/reference/resume.md` and follow it — it carries the three rules that apply only on a
+resume. A fresh run skips that file entirely.
 
 ## Ground rules
 
-- **You decide. The user reviews the outcome, not the process.** Same principle `brainstorm`
-  used to reach you: default to making the call yourself at every decision point in every phase
-  — which specialists to route to, a specialist's design choices, how Open Concerns get handled,
-  how to degrade when a budget is tight. Only interrupt the user when a decision is genuinely
-  high-stakes (irreversible, expensive, materially changes scope, or touches security/data in a
-  way that's hard to walk back). State assumptions plainly wherever they show up rather than
-  pausing to get them rubber-stamped. **There are exactly two standing interactive gates in this
-  skill**, and no others: on a *plan-only* run, the implementation boundary at the end of Phase 4;
-  and, in both run types, Phase 5's per-pass prompt asking how many tasks to run in parallel. A
-  full run does not pause at the implementation boundary at all — report the plan and keep going.
-  In a **non-interactive** run those two answers come from `run.json` instead of from a question,
-  and nothing else about the gates changes: the plan is still reported before implementation, and
-  the pass barrier still holds until every task in the pass is done.
-- **All spawning happens from this skill.** No agent defined in this plugin has `Agent` in its
-  own `tools` — every specialist, reviewer, consolidator, reconciler, worker, and the
-  task-specialist is spawned directly by you, the main thread running this skill. This is
-  deliberate: nested agent-spawning is unproven in this environment, and every fan-out this
-  pipeline needs can be done flat.
+- **You decide. The user reviews the outcome, not the process.** Default to making the call
+  yourself at every decision point in every phase — routing, a specialist's design choices, how
+  Open Concerns get handled, how to degrade on a tight budget. Interrupt only when a decision is
+  genuinely high-stakes (irreversible, expensive, materially changes scope, or touches
+  security/data in a way that's hard to walk back). State assumptions plainly rather than pausing
+  to get them rubber-stamped. **There are exactly two standing interactive gates**, and no
+  others: on a *plan-only* run, the implementation boundary at the end of Phase 4; and, in both
+  run types, Phase 5's per-pass prompt asking how many tasks to run in parallel. A full run does
+  not pause at the implementation boundary at all. In a **non-interactive** run those two answers
+  come from `run.json` instead, and nothing else about the gates changes.
+- **All spawning happens from this skill.** No agent in this plugin has `Agent` in its `tools` —
+  every specialist, reviewer, consolidator, reconciler, worker and task-specialist is spawned by
+  you, the main thread. Nested spawning is unproven here, and every fan-out this pipeline needs
+  can be done flat.
 - **Background by default.** Spawn every specialist/reviewer/consolidator/reconciler/worker with
-  `run_in_background: true` so batches genuinely run concurrently. Only the single Phase 4
+  `run_in_background: true` so batches genuinely run concurrently. Only Phase 4's single
   `task-specialist` call is a reasonable candidate for `run_in_background: false`, since nothing
-  else can proceed until it returns anyway.
-- **Meter attribution line (inert if the `meter` subsystem isn't installed).** Prefix every
-  `Agent` spawn's `prompt` with one line, `DAG-NODE: <run-id>/<node-id>`, before the task content
-  itself — `<node-id>` is `P1-<specialist>` in Phase 1, `P2-<specialist>-r<round>-<angle>` for a
-  reviewer or `P2-<specialist>-r<round>-consolidator` for the consolidator in Phase 2,
-  `P3-reconciler` in Phase 3, `P4-task-specialist` in Phase 4, `<task-id>-worker` /
-  `<task-id>-reviewer` in Phase 5, `P6-integration-reviewer` in Phase 6. This is plain metadata a
-  local measurement tool may read to attribute token spend to a node; nothing reads it and
-  nothing about this skill's behavior depends on it if that tool isn't present.
+  else can proceed until it returns.
+- **Prefer a script to a spawn.** Where this skill offers a deterministic path for a mechanical
+  step — Phase 2's `dag-fold.py`, Phase 4's `dag-distill.py` — take it, and fall back to the
+  agent only on the documented escalation signal. Each of those scripts replaces a model call
+  with computed output and is written to fail toward the agent, never past it.
+- **Meter attribution line (inert if `meter` isn't installed).** Prefix every `Agent` spawn's
+  `prompt` with one line, `DAG-NODE: <run-id>/<node-id>`, before the task content — `<node-id>` is
+  `P1-<specialist>` in Phase 1, `P2-<specialist>-r<round>-<angle>` for a reviewer or
+  `P2-<specialist>-r<round>-consolidator` for the consolidator in Phase 2, `P3-reconciler`,
+  `P4-task-specialist`, `<task-id>-worker` / `<task-id>-reviewer` in Phase 5, and
+  `P6-integration-reviewer` in Phase 6. Plain metadata a local measurement tool may read; nothing
+  about this skill's behavior depends on it.
 - **Resume by name, never respawn.** A specialist's multi-round revision (Phase 2), its Phase 3
   reconciliation, and a Phase 5 worker's rework after a FLAGGED review are always a `SendMessage`
-  addressed to that agent's own spawn name — this resumes it with full context, and in the
-  worker's case with the worktree its work already lives in. Re-spawning a fresh instance would
-  lose everything it already produced. Spawn fresh only where the tree itself has to be fresh: a
-  merge-conflict retry in integration mode, a reopened contract consumer, or an agent whose spawn
-  is no longer reachable.
-- **Don't override agent models.** Each agent declares its own explicit tier in frontmatter —
-  `spec-consolidator` and `spec-distiller` run on Haiku (both are mechanical: deduplicating and
-  ranking work someone else already did, or compiling/verifying a brief against closed
-  questions), every other agent runs on Sonnet. Pass no `model` to `Agent`; the three
-  `spec-reviewer` instances in each Phase 2 round decorrelate by assigned angle (completeness/gaps,
-  internal consistency, feasibility/risk), not by model.
+  to that agent's own spawn name — this resumes it with full context, and in the worker's case
+  with the worktree its work already lives in. Re-spawning would lose everything it produced.
+  Spawn fresh only where the tree itself has to be fresh: a merge-conflict retry in integration
+  mode, a reopened contract consumer, or an agent whose spawn is no longer reachable.
+- **Don't override agent models.** Each agent declares its own tier in frontmatter —
+  `spec-consolidator` and `spec-distiller` on Haiku (both mechanical), every other agent on
+  Sonnet. Pass no `model` to `Agent`; Phase 2's reviewers decorrelate by assigned angle, not by
+  model.
 - **Persist as you go, don't batch it up.** Every phase writes its artifacts to the run directory
-  *as it completes*, not at the end. A run that dies at Phase 5 must leave Phases 1–4 fully
-  recoverable on disk.
-- **Spec-producing agents write their own deliverables.** Every agent that produces a
-  document-sized artifact — a specialist deliverable, reviewer findings, a consolidated list, the
-  reconciler's rulings, a distilled brief, the task graph — carries `Write`, scoped to the exact
-  path you give it in its prompt, and writes there directly instead of returning the full
-  deliverable in its final chat message. Give it that path explicitly every time you spawn or
-  resume it; it should never have to guess where its own output belongs, and it must never write
-  anywhere else (only its own named artifact — project files are `task-worker`'s alone). This is
-  not a formatting nicety: forcing a large document through a single final chat message is what
-  has caused this pipeline's worst observed stalls — a reconciler hitting the output-token ceiling
-  mid-document, twice, on one run, needing a human to hand it manual chunking instructions before
-  the run could continue; several reviewers and consolidators returning truncated "receipt-only"
-  finals that needed a resume just to get the real content out. A `Write` call has no equivalent
-  ceiling. The same logic applies to what *you* hand an agent: give it the path to its input
-  (`Read` it yourself, or point the agent at it) rather than pasting a large upstream artifact
-  inline — nothing should be restated in full at every hop of the pipeline.
-- **Depth proportional to the request.** A deliverable's length and exhaustiveness should track
-  what this specific request actually needs decided, not a fixed template's checklist. A
-  single-file, client-only page needs a short architecture note, not an enterprise-scale document;
-  say so when you spawn a specialist if the request's scope is obviously small. Padding isn't
-  thoroughness — it's the same failure mode as the point above, just below the threshold where
-  anything breaks outright.
+  *as it completes*. A run that dies at Phase 5 must leave Phases 1–4 fully recoverable on disk.
+- **Spec-producing agents write their own deliverables.** Every agent producing a document-sized
+  artifact — a specialist deliverable, reviewer findings, a consolidated list, the reconciler's
+  rulings, a distilled brief, the task graph — carries `Write` scoped to the exact path you give
+  it, and writes there directly instead of returning the document in its final chat message. Give
+  it that path every time you spawn or resume it; it must never write anywhere else (project
+  files are `task-worker`'s alone). This is not a formatting nicety: forcing a large document
+  through one final message has caused this pipeline's worst observed stalls — a reconciler
+  hitting the output-token ceiling mid-document twice on one run, reviewers returning truncated
+  "receipt-only" finals needing a resume just to emit the real content. A `Write` call has no
+  such ceiling. The same applies to what *you* hand an agent: give it the path to its input
+  rather than pasting a large upstream artifact inline. **Nothing is restated in full at any hop
+  of this pipeline.**
+- **Depth proportional to the request.** A deliverable's length should track what this request
+  actually needs decided, not a template's checklist. A single-file, client-only page needs a
+  short architecture note, not an enterprise document — say so when you spawn a specialist if the
+  scope is obviously small. Padding isn't thoroughness.
 - **Once an artifact is written, your memory of it is its path, not its text.** Re-read
   `merged-spec.md`, `tasks.json`, or a specialist's round file from `.dag/runs/<run-id>/` at the
-  point of use instead of carrying full artifact text forward in context. A `full` run outlives
-  several context compactions; the run directory is what survives them, and this rule is what
-  makes the run survivable.
-- **Roster tracking.** If a task-list tool (`TodoWrite`) is available in your session, use it for
-  the in-flight roster; otherwise track phase state and the roster in your own running text —
-  say what's still open, what's in flight, and what's done.
+  point of use instead of carrying artifact text forward. A `full` run outlives several context
+  compactions; the run directory is what survives them, and this rule is what makes the run
+  survivable.
+- **Roster tracking.** If `TodoWrite` is available, use it for the in-flight roster; otherwise
+  track phase state and the roster in your own running text.
 
 ### Budget
 
@@ -243,9 +241,12 @@ install, or if meter is off — that's normal, not an error). If it does, look u
 `weights[<mode>][<agent_type>]`; use that number in place of the tier weight for that spawn. If
 the file is absent, or has no entry for this exact `(mode, agent_type)` pair, fall back to the
 tier weight above — never block on a missing or malformed weights.json, and never invent a number
-for an agent type it doesn't cover. The ceiling, the degradation ladder, and everything below in
-this section are otherwise completely unchanged — recalibration only makes the existing budget
-math more accurate, it never replaces the policy.
+for an agent type it doesn't cover.
+
+**A step that runs as a script costs nothing against the budget.** A `dag-fold.py` consolidation
+or a `dag-distill.py` cache hit spawns no agent, so it gets no `spawns` entry and no weight. That
+is the point of taking those paths, and it is why the ceilings above are lower than they were
+before those paths existed.
 
 When a run crosses the mode's soft budget, **degrade rather than stop or silently overspend**,
 in this order: drop remaining review rounds to 1, then narrow any not-yet-started specialists to
@@ -259,456 +260,11 @@ present as complete.
 ### Stuck agents
 
 Any spawn can fail to return. If a review round or execution pass is otherwise complete and one
-member hasn't reported:
-respawn it once with the same prompt. If the respawn also fails, proceed without it — record the
-gap in the run directory and in your final summary. A missing specialist's section in the merged
-spec reads "not produced (agent failed twice)"; a missing reviewer just means that round had two
-reviewers. Never block the whole pipeline on one unresponsive agent.
-
-## Phase 1 — Route & Fan-out
-
-**In `micro` mode, skip Phases 1–3 entirely**: write `routing.md` noting "micro — no
-specialists; the request is the spec", copy the request into `merged-spec.md`, mark phases 1–3
-`"skipped"` in `run.json`, and go straight to Phase 4.
-
-**Route first.** Not every request needs every specialist, and an irrelevant deliverable isn't
-free — it still costs a full review loop to produce something that adds noise to the merged spec.
-Select from the eight:
-
-- **Always**: `architecture-specialist`, `research-specialist`, `test-planning-specialist`.
-- **`security-specialist`** if the request touches auth, user or sensitive data, secrets, or
-  input from an untrusted source.
-- **`data-schema-specialist`** if it implicates persistence — a database, file format, cache, or
-  wire schema.
-- **`design-specialist`** if it has user-facing surfaces with layout or interaction.
-- **`ux-copy-specialist`** if it has user-facing text a human reads.
-- **`cost-estimation-specialist`** if it carries real infra cost, per-call API/model spend, or a
-  big enough time commitment to change whether it's worth doing.
-
-If the user passed `--all`, select all eight and skip the judgment. In `lite` mode, cap the
-selection at 4 — keep the always-on three plus the single most relevant optional one. **When more
-than one optional domain is deterministically triggered by its own hard rule above** (e.g. a
-request that touches both auth and persistence triggers both `security-specialist` and
-`data-schema-specialist`), don't guess which is "most relevant" — break the tie by a fixed risk
-order: `security-specialist` > `data-schema-specialist` > `cost-estimation-specialist` >
-`design-specialist` > `ux-copy-specialist`. Name every optional domain the tie-break dropped as an
-explicit stated omission in `routing.md` ("also touches cost-estimation, dropped by the lite-mode
-cap in favor of security") — never let it disappear silently.
-
-State the selection and the skips in one line ("Routing to 5: architecture, research,
-test-planning, data-schema, security — skipping design/ux-copy (no user-facing surface) and cost
-(no infra delta)"), write it to `<run-dir>/routing.md`, and don't ask for approval of it.
-
-**Then fan out.** In a single turn, issue one `Agent` call per selected specialist,
-`run_in_background: true`, giving each the fully-specified request verbatim, framed for its
-domain, plus the exact path it must `Write` its deliverable to:
-`<run-dir>/specialists/<name>/round-0.md`. Note every spawn name — you need them for Phase 2's and
-Phase 3's `SendMessage` resumes — and record each specialist in `run.json`'s `specialists` array
-(`{"name": ..., "spawn": ..., "rounds": 0, "status": "drafting"}`).
-
-Don't block waiting on them one at a time; let completion notifications arrive and track against
-your roster.
-
-## Phase 2 — Build + review loop (per specialist, independently)
-
-Run this once per specialist, starting as soon as that specialist's first draft lands (don't
-wait for all of them — they can be at different rounds simultaneously):
-
-1. Spawn 3 `spec-reviewer` agents in one batch, `run_in_background: true`, each given the path to
-   the specialist's current deliverable (`<run-dir>/specialists/<name>/round-<n>.md` — it `Read`s
-   this itself), the original request, one of the three named angles defined in the
-   `spec-reviewer` agent file — **completeness/gaps**, **internal consistency**, and
-   **feasibility/risk** — and the exact path it must `Write` its findings to:
-   `<run-dir>/specialists/<name>/round-<r>-findings-<angle>.md` (`r` is this review round's
-   number, starting at 1; `angle` one of `completeness`/`consistency`/`feasibility`). **Meter's
-   adaptive quorum (v2 M8, inert unless `meter.modules.quorum.enabled` is explicitly set true,
-   which it is not by default) may narrow this to 1 reviewer for a specialist domain the daemon
-   has measured, over 50+ full runs, adds nothing beyond what one reviewer already catches — see
-   `meter/quorum.py`. Absent that measurement (the default state, and the only state possible
-   before this plugin has real run history), always spawn all 3 exactly as written here; this is
-   not something to reason about per run.**
-2. Each reviewer ends its final message with a short confirmation of what it wrote, then
-   `REVIEW: CLEAN` or `REVIEW: FINDINGS <n>`. **Read that line, not a tool call** — reviewers do
-   not call `ReportFindings` (they review prose, which has no file or line to anchor to). If all 3
-   report `REVIEW: CLEAN`, the round closes early and this specialist is done; skip to step 5. **If
-   a reviewer's final message has no parseable `REVIEW:` line at all, treat it as
-   `REVIEW: FINDINGS 1`** — a reviewer that returned no verdict is not evidence the deliverable is
-   clean. Note the gap (in `run.json`'s `degradations` or your own running notes) so it stays
-   visible, and carry it into consolidation as one generic finding requiring the specialist's
-   attention rather than silently treating the round as clean.
-3. Otherwise spawn 1 `spec-consolidator`, `run_in_background: true`, with the paths to the 3
-   finding files (it `Read`s them itself) and the path it must `Write` its consolidated list to:
-   `<run-dir>/specialists/<name>/round-<r>-consolidated.md`. It ends with a short confirmation and
-   `CONSOLIDATED: <n>`. If the count is `0`, the round closes — deduplication can dissolve three
-   near-findings into nothing, and an empty list is not worth a revision round. **If
-   `spec-consolidator` returns no parseable `CONSOLIDATED:` line, treat it as `CONSOLIDATED: 1`**
-   rather than closing the round early — a missing count is not evidence of an empty list — note
-   the gap the same way, and resume the specialist with whatever raw finding text you do have.
-4. `SendMessage` the specialist **by its Phase 1 spawn name** — never a fresh spawn — pointing it
-   at the consolidated-findings path (it `Read`s that itself) and the path for its revised
-   deliverable, `<run-dir>/specialists/<name>/round-<r>.md`, asking it to accept valid findings,
-   push back with reasoning on the rest, and write a revised deliverable there.
-5. That's one round. Repeat 1–4 up to the mode's round cap (3 in `full`, 1 in `lite`) — but stop
-   early on **diminishing returns**: if the specialist's revision accepted *none* of the round's
-   findings (it pushed back on everything), don't spend another round re-litigating — a further
-   identical round rarely moves a considered pushback. Carry anything a reviewer would still
-   stand behind forward as an Open Concern instead.
-6. Each round's deliverable and consolidated findings are already on disk at the paths above,
-   written by the agents themselves as they completed — update that specialist's `rounds`/`status`
-   in `run.json`, and re-read a file at the point of use rather than carrying its text forward.
-7. **If the last round completes and a finding is still unresolved** — the specialist pushed back
-   on something a reviewer would still stand by — don't loop another round and don't silently
-   drop it. Take the specialist's last deliverable as final, and carry the unresolved finding
-   into Phase 3 as a flagged **Open Concern**.
-
-## Phase 3 — Merge & Reconcile
-
-Once every specialist has finished its Phase 2 loop:
-
-1. **Merge.** You (not a spawned agent) assemble the combined build spec directly: `Read` each
-   specialist's final deliverable from its own path on disk (never carry it forward from context —
-   it was written there as Phase 2 completed) and concatenate them under their own headings
-   (Design Spec, Architecture Spec, Research Notes, Security Spec, Test Plan, Cost & Resource
-   Estimate, UX Copy, Data & Schema Spec — only those that ran), followed by an `## Open Concerns`
-   section listing anything carried over from Phase 2 step 7, attributed to the specialist it came
-   from. Write it to `<run-dir>/merged-spec.md`.
-
-2. **Reconcile.** Spawn one `spec-reconciler` with the path to the merged spec (it `Read`s it
-   itself) and the path it must `Write` its rulings to, `<run-dir>/reconcile.md`. Every review loop
-   up to this point was *intra*-specialist — three reviewers on one deliverable, blind to its
-   siblings — so nothing so far could catch two deliverables that are each internally excellent
-   and mutually incompatible. This is the pass that does.
-
-   It ends with a short confirmation, then `RECONCILE: CLEAN` or `RECONCILE: CONTRADICTIONS <n>`.
-   **If it returns no parseable `RECONCILE:` line, treat it as `RECONCILE: CONTRADICTIONS 1`**
-   rather than `CLEAN` — a missing verdict is not evidence the specs agree. Note the gap, and since
-   there is no actual contradiction text to route back to two named specialists, carry it forward
-   as an Open Concern instead of trying to resolve an unspecified one.
-
-3. **Resolve contradictions.** For each one, `SendMessage` it to **both** named specialists (they
-   are still resumable from Phase 1), pointing at the same `round-<n>.md` path each already owns,
-   asking each to either adopt the other's position and overwrite that file in place, or state why
-   theirs should stand and leave it unchanged. If they still disagree after one exchange, promote
-   it to an Open Concern rather than looping — one round of reconciliation is enough to catch
-   honest mismatches, and a second rarely changes a genuine judgment call. `reconcile.md` is
-   already on disk, written directly by the reconciler; append the resolution outcome to it rather
-   than rewriting the whole file. **If any specialist's file actually changed**, redo the Merge
-   step above (re-`Read` and re-concatenate) so `merged-spec.md` reflects it — it does not update
-   itself.
-
-4. **Show the user the merged spec and move straight into Phase 4** — don't wait for a go/no-go
-   by default, same reasoning as the ground rules: the user wants the finished work, not a
-   checkpoint on every intermediate artifact.
-
-   The one exception is **Open Concerns that are themselves high-stakes** — a genuine unresolved
-   disagreement touching security, data, or something costly to undo. For those specifically,
-   pause and ask before Phase 4, since proceeding on a guess there is exactly the kind of decision
-   this pipeline shouldn't make unilaterally. Low-stakes Open Concerns get noted and carried
-   forward, not gated on.
-
-## Phase 4 — Decompose into a task DAG
-
-**Distill first (inert if the `meter` subsystem isn't installed) — skip it entirely in `micro`
-mode.** `micro`'s own definition is "no specialists, no spec review — the request is the spec": by
-the time Phase 4 starts, `merged-spec.md` already holds nothing more than the raw one-sentence
-request, copied verbatim by Phase 1's micro shortcut. There is nothing there to compress, and
-running Distill anyway would spend 2-4 extra foreground spawns (compile, verify, and on a miss a
-revise-and-re-verify round) on exactly the class of run `micro` exists to keep cheap. In `micro`
-mode, skip straight to spawning `task-specialist` below with `merged-spec.md` as its input, exactly
-as in `full`/`lite` when Distill isn't used. Everything below this paragraph applies to `full` and
-`lite` only.
-
-**A note on latency, in the same spirit as the budget-degradation disclosure below.** In `full` and
-`lite` mode, Distill's own critical path — compile, verify, and on a miss a revise-and-re-verify
-round — is fully serial and runs in the foreground, because each step's output gates the next. In
-the worst case (a missed fidelity gate) that is four round-trips stacked before `task-specialist`
-even starts, which is itself foreground and blocking. This is a deliberate correctness-over-latency
-trade, not an oversight: the fidelity gate exists specifically so a compressed brief is never used
-uncompressed-and-unverified, and that guarantee costs the round-trips it costs.
-
-Every `dag-distill.py`
-reference below means: locate it the same way `/dag-meter` does (`${CLAUDE_PLUGIN_ROOT}/scripts/
-dag-distill.py`, falling back to searching `~/.claude/plugins` for a `yolo-dag` checkout, falling
-back to `scripts/dag-distill.py` relative to the current directory) and run it with `python3` —
-the plugin isn't necessarily under the current directory. Before spawning `task-specialist`, check
-whether a compiled brief for this exact spec already exists: `dag-distill.py check
-<run-dir>/merged-spec.md`. Exit `0` with output means a cached brief exists (an identical spec was
-distilled before, this run or a prior one) — use its printed content in place of the full spec
-below and skip straight to spawning `task-specialist`. Exit `1` means no cache hit; compile fresh:
-
-1. Spawn `spec-distiller` in **compile mode**, foreground, with the path to the merged spec (it
-   `Read`s it itself), `meter.modules.distill.probe_count` (default 25, use 25 if `meter` config
-   isn't readable) as the number of verification questions to generate, and the two paths it must
-   `Write` to: `<run-dir>/brief.md` and `<run-dir>/distill-answer-key.md`.
-2. Spawn `spec-distiller` again — a **fresh spawn**, not a resume — in **verify mode**, foreground,
-   with only the path to the brief (`<run-dir>/brief.md` — it `Read`s it itself) and the bare
-   questions (strip the answers out of `distill-answer-key.md` yourself before passing them —
-   never the answers, never the full spec).
-3. **Grade it yourself.** `Read` `<run-dir>/distill-answer-key.md` for the stored answers and
-   compare the verify pass's answers against them, question by question. Any answer that's wrong,
-   or "not answerable from the brief," is a miss. **Any miss at all rejects the brief** — this is
-   what makes Distill "verified" rather than a hopeful compression, so don't round up a near-miss.
-4. **On a miss**, `SendMessage` the compile-mode spawn (resume it, don't respawn) naming exactly
-   which questions it missed and why, and ask it to revise `brief.md` in place to cover those gaps.
-   Re-run the verify pass (a fresh spawn again) once, against the same path. If it passes this
-   second attempt, proceed with the revised brief. **If it fails again, give up on distillation for
-   this spec**: use the full spec (`<run-dir>/merged-spec.md`) for `task-specialist` below, and
-   note the failure in one line in your final report (this is a real degradation worth surfacing,
-   same spirit as the existing budget degradation channel).
-5. **On a full pass** (first or second attempt), cache it: `python3 scripts/dag-distill.py store
-   <run-dir>/merged-spec.md <run-dir>/brief.md` — the brief is already on disk at that path, so no
-   temp file needed. Use `<run-dir>/brief.md` in place of the full spec below.
-
-Spawn one `task-specialist` with the path to the full merged and reconciled spec
-(`<run-dir>/merged-spec.md`), or — if Distill produced a brief that passed its gate — the path to
-the brief instead (`<run-dir>/brief.md`), stating plainly that the full spec is at
-`<run-dir>/merged-spec.md` if `task-specialist` needs something the brief doesn't cover (if it
-says it does, tell it to Read that path, and afterward run `python3 scripts/dag-distill.py
-record-fetch <run-dir>/merged-spec.md` — this is the fetch-rate signal that tells a future
-tuning pass the brief was too thin), plus the path it must `Write` the task graph to:
-`<run-dir>/tasks.json`. Foreground either way — nothing else can proceed until it returns. It
-applies the decomposition rules in its own agent definition — **independence first, shared
-contracts where a boundary is unavoidable, a real `depends_on` edge only as a last resort** —
-writes the graph directly to `tasks.json`, and returns a short human-readable summary (contracts,
-a one-line-per-task list, folds/assumptions made) rather than pasting the graph inline.
-
-**Validate the graph before executing it.** `Read` `<run-dir>/tasks.json` — written directly by
-`task-specialist` — then check:
-
-- every id is unique;
-- every `depends_on` entry names a task that exists, and carries a `reason`;
-- the graph is **acyclic**;
-- **no file is owned by two tasks.** Every path in a task's `owns` list belongs to exactly one
-  task. This is a hard check, not a warning: shared ownership means the split is wrong, and the
-  fix is the specialist's (re-split, or move the shared surface into a contract), not yours;
-- every contract named in a task's `contracts` list is defined in the top-level `contracts`
-  array, and each contract has exactly one owner task.
-
-If any check fails, `SendMessage` the specific problem back to `task-specialist` and ask for a
-corrected graph. A cycle will deadlock Phase 5 — never try to execute one, and never break it
-yourself by dropping an edge at random.
-
-A `depends_on` entry may also arrive as a bare id string rather than an `{id, reason}` object —
-graphs written by an older version of this pipeline, and hand-edited state, both look like that.
-Read it as an edge with an unstated reason rather than failing the run over it, and read a legacy
-`files` key as `owns`.
-
-Then compute the **topological levels** ("waves") — level 0 is every task with
-`depends_on: []`; level *n* is every task whose dependencies all sit in levels `< n`. Levels are
-the proof of acyclicity and the reporting shape ("14 tasks in 4 waves: 6, 5, 2, 1" — report that
-line to the user); the actual scheduling in Phase 5 is a user-paced pass loop over the candidate
-set, not a strict wave-by-wave walk. A well-decomposed graph is mostly level 0 — that is the
-point of the independence-first rules, not a sign the specialist under-thought the ordering.
-
-**Report the plan, then branch on the run type** — read `plan_only` from `run.json`, not from
-memory. Either way, first report the routing decision,
-where the merged spec lives, the task graph and its shape, the shared contracts and who owns each,
-and any Open Concerns.
-
-- **Full run** → **enter Phase 5 immediately, with no confirmation.** Do not ask whether to
-  proceed, do not re-ask anything `brainstorm` already settled. The user chose a full run at the
-  start precisely so this boundary wouldn't stop them.
-- **Plan-only run** (`plan_only: true`) → **stop at this boundary and ask**, via
-  `AskUserQuestion`, whether to proceed with implementation now. Start no work — no branch, no
-  worker — until they confirm.
-  - **In a non-interactive run** (`non_interactive: true`) there is nobody to ask, so stop here
-    cleanly instead: leave phases 5–6 `"pending"` in `run.json` and report that
-    `/dag-resume <run-id>` executes the plan. The confirmation still gates the work; it just
-    arrives as a later invocation rather than an answer.
-  - **Proceed** → move into Phase 5.
-  - **Not yet** → leave phases 5–6 `"pending"` in `run.json` and tell them `/dag-resume <run-id>`
-    executes the plan once they're ready.
-  - **Substantive feedback on the spec or graph itself** (not just "not yet") → route it to
-    where it actually belongs — a task-shape complaint back to `task-specialist` (resumable
-    in-session via `SendMessage`), a spec-level complaint back to the relevant Phase 1
-    specialist — re-validate whatever comes back, then re-offer this same gate. Don't
-    reinterpret their feedback yourself and proceed on a guess.
-
-## Phase 5 — Execute, verify & merge (in user-paced passes)
-
-Execution proceeds one **pass** at a time. Before each pass you take a single number — how many
-tasks to run in parallel — then choose the tasks yourself and drive every one of them to *done*
-before taking another. A task is done only when a `task-reviewer` has approved it. The number
-comes from the user, asked once per pass; in a non-interactive run it comes from `run.json`'s
-`tasks_per_pass` instead.
-
-The pause between passes is the point: the user reviews finished work in small batches instead of
-the whole DAG landing at once. It happens in both run types, plan-only and full alike.
-
-1. **Create the integration branch first**: `git checkout -b dag/<run-id> <base_commit>` in the
-   main working tree, and record `integration_branch` in `run.json`. The main tree stays on this
-   branch for the whole phase — that is the mechanism by which every worker worktree spawned from
-   here is based on the branch's current tip. Never integrate onto `main` (or the repo's default
-   branch) directly, and never without the user asking.
-2. **Compute the candidate set.** A task is a *candidate* when it has not run and every id in its
-   `depends_on` is MERGED. Recompute this fresh at the start of every pass — it typically grows
-   with whatever the last pass unlocked.
-3. **Ask how many tasks to run in parallel this pass**, via `AskUserQuestion`. Which cap applies
-   comes from `run.json`'s `plan_only`, re-read at each pass rather than remembered.
-
-   **In a non-interactive run** (`non_interactive: true` in `run.json`) don't ask: take
-   `tasks_per_pass` from `run.json` as this pass's number, say in one line that you're using it,
-   and go to step 4. It was validated against the cap at startup. Everything else about the pass
-   is unchanged — you still select the tasks, still enforce independence, still run the eligible
-   subset when fewer qualify, and still hold the barrier at the end of the pass.
-
-   Otherwise ask for a **number, and nothing else**:
-   - **Never ask which tasks.** Selection is yours (step 4). A question naming tasks is the wrong
-     question however carefully it's phrased.
-   - **Full run: the maximum is 3 per pass, and you state the maximum in the question** ("How many
-     tasks should run in parallel this pass? (max 3)"). Offer whichever of `3, 2, 1` are ≤ the
-     candidate count; if the user types a larger number anyway, clamp to 3 and say so.
-   - **Plan-only run: there is no maximum.** Offer a few sensible numbers up to the candidate
-     count and let the user type any number they like; you spawn one worker per selected task.
-     The user reviewed the whole plan before approving implementation, so the ceiling that
-     protects a full run has already been paid for here.
-   - If exactly one candidate remains there is no choice to offer — say so in one line, dispatch
-     it, and skip the prompt.
-   - If the answer exceeds what's available, clamp per step 4 and say what you clamped to. Never
-     re-ask because the number didn't fit.
-4. **Select the tasks yourself** — the best next candidates by readiness and dependency order,
-   longest-remaining-dependency-chain first (critical path first), so the pass unlocks as much of
-   the graph as it can. Two hard constraints on the selection:
-   - **Every task in a pass must be fully independent of every other task in it.** No task in the
-     pass may appear in another's `depends_on`, transitively included, and no two may own the same
-     file.
-   - **When the requested count would pull in a task that isn't independent of the rest, don't run
-     them together.** Say which tasks are eligible and why, then proceed with the eligible subset
-     — **without re-asking**: *"You asked for 3 tasks. Task 3 depends on Task 2, so only Tasks 1
-     and 2 can run in this pass."* The same applies when fewer independent candidates remain than
-     the user asked for: take what's eligible, say so, and go.
-5. **Spawn one `task-worker` per selected task**, `run_in_background: true`, with
-   `isolation: "worktree"`. Give each worker its task, its acceptance criteria, its `owns` list,
-   the verbatim text of every contract it implements or consumes (from `tasks.json`'s `contracts`
-   array — the *current* version, not the version quoted in an older report), and the final
-   reports of every task in its `depends_on` — noting that the dependencies' actual code is
-   already present in its tree, and the reports are context, not the source of truth.
-
-   **The number is a target, not a guarantee.** If the runtime won't spawn that many agents at
-   once, spawn as many as it allows and queue the remainder *as part of this same pass*,
-   dispatching each queued task as a slot frees up. A runtime limit is not a reason to ask the
-   user a second question: don't prompt again until the whole pass is done.
-6. **Read each worker's machine trailer as it reports** — the literal `WORKTREE:`, `BRANCH:`,
-   `COMMIT:`, and `BLOCKER:` lines at the end of its final message. That trailer is the only
-   channel through which the pipeline learns where the work physically is; a report without it is
-   a report of nothing.
-   - `COMMIT: none` alongside a claim of success means the worker produced nothing (an unchanged
-     worktree is auto-cleaned). There is nothing to rework, so spawn a fresh worker for the task
-     within this same pass; it consumes one of the task's rework rounds.
-   - `BLOCKER: contract-conflict` means a shared contract can't be implemented as written — go to
-     step 12. It is not a worker failure and does not consume a rework round.
-   - `BLOCKER: <class>` otherwise (`spec-defect` / `environment` / `criteria-conflict` /
-     `unknown`) means the worker judged the task unsatisfiable. Spawn **one** fresh worker to
-     independently confirm; if it reports the same blocker class, mark the task BLOCKED with that
-     class — don't burn the remaining rework rounds re-confirming.
-   - **Verify the commit is reachable** from the main repo (`git cat-file -e <sha>`). If it
-     isn't — the isolation mechanism gave the worker a detached copy rather than a
-     shared-object worktree — fetch it in: `git fetch <worktree-path> <sha>`. If both fail, treat
-     the spawn as failed under the stuck-agent rule.
-7. **Review each task as soon as its own worker reports** — one `task-reviewer` per finished task,
-   `run_in_background: true`, with the task's acceptance criteria, the current text of its
-   contracts, the worker's report, and — critically — the worker's `WORKTREE` path and `COMMIT`
-   sha, so it verifies the actual work (`git -C <worktree> ...`) rather than the main tree, where
-   the changes do not exist. Restate those two values as their own literal lines,
-   `WORKTREE: <path>` and `COMMIT: <sha>`, somewhere in the reviewer's prompt (same "inert if
-   `meter` isn't installed" pattern as the `DAG-NODE:` line above) — this is the only way a local
-   measurement tool can find the worktree/commit to run deterministic checks against before the
-   reviewer starts; without a fixed format, it has no reliable way to locate them in free-form
-   prose. Tasks in a pass move through their own cycles independently; the barrier is at the end
-   of the pass, not between its stages.
-8. **Read each reviewer's verdict from the literal `VERDICT: PASS` / `VERDICT: FLAGGED` line at
-   the end of its final message.** Do not branch on a `ReportFindings` tool call — that renders to
-   the host UI and is not the channel you receive. If a reviewer somehow returns no verdict line,
-   treat it as FLAGGED and note it.
-9. **On `VERDICT: FLAGGED`, the task goes back to its own worker to rework** — `SendMessage` the
-   reviewer's findings to that worker's spawn name, so it fixes the defect in the worktree it
-   already owns and re-commits. Then re-review: `SendMessage` the new commit back to the same
-   reviewer (it holds the findings it raised and is the cheapest correct check that they were
-   actually addressed). The task is done only when a reviewer returns `VERDICT: PASS`.
-   - **If the worker's spawn is unreachable** — a resumed run, a dead agent — spawn a fresh
-     `task-worker` with the findings instead; its worktree comes off the branch's current tip.
-     Same for an unreachable reviewer: spawn a fresh one with the findings and the new commit.
-   - This all happens **inside the same pass**: the pass is not closed until this task also
-     reaches a terminal state.
-   - **Cap: 2 rework rounds per task (3 reviews total).** On the 3rd `FLAGGED`, mark it BLOCKED
-     and hold its accumulated findings for the final summary.
-10. **On `VERDICT: PASS`, merge immediately**: `git merge --no-ff <commit>` onto `dag/<run-id>`
-    in the main tree.
-    - **Clean merge** → mark the task MERGED, then remove its worktree
-      (`git worktree remove <path>` and `git worktree prune`) — the work is on the branch; the
-      worktree is done. Cleanup happens as each task lands, not deferred to Phase 6.
-    - **Conflict** → `git merge --abort`, then spawn a fresh `task-worker` in **integration
-      mode**: give it the task, its acceptance criteria, and the conflict, and have it redo the
-      task's intent on top of the branch's current tip (its fresh worktree already contains the
-      integrated code). This is a distinct retry reason from a FLAGGED review, also resolved
-      **within the same pass**, and gets its own cap: **1 integration retry per task.** A second
-      conflict → mark the task UNMERGED, *keep its worktree*, and report the path — that worktree
-      is the only copy of the work. Two tasks in one pass conflicting on a file is also a
-      decomposition bug (they should not have owned the same file); say so when it happens.
-11. **A BLOCKED task blocks its dependents.** Any task whose `depends_on` includes a BLOCKED (or
-    UNMERGED) task cannot run — mark it SKIPPED (not BLOCKED; it never got an attempt) and carry
-    it to the summary. Do not run a task whose dependency never landed on the branch.
-12. **When a shared contract turns out to be wrong** (`BLOCKER: contract-conflict`), the worker
-    stops rather than improvising a different shape, and the fix is yours, not its:
-    - Read the reported mismatch against the contract's current text in `tasks.json`. If it's the
-      task that's wrong rather than the contract, send that back as a rework (step 9) and say so.
-    - Otherwise **revise the contract** — resuming `task-specialist` via `SendMessage` when the
-      right shape isn't obvious — and write the revision into `tasks.json`: the `contracts` entry
-      plus the verbatim copy carried in each bound task's description.
-    - **Reopen every task that consumes the revised contract, including tasks already marked
-      MERGED**, and return each to the worker/reviewer cycle with the new contract text. A merged
-      task reopens as a fresh worker off the branch's current tip (which contains its own earlier
-      work); a merged-then-revised task is not exempt because it already passed once — it passed
-      against a contract that no longer exists.
-    - **This reopen does not draw against the task's ordinary rework budget** (the 2-rework/
-      3-review cap from step 9) — it is a separate, independently bounded loop, capped instead by
-      the one-revision-per-contract rule below. A task can in the worst case see both its full
-      normal rework budget *and* one contract-triggered reopen in the same run without either
-      budget starving the other.
-    - Reviewers verify against the **current** contract, never the version a task was written
-      against. Pass the current text in every reviewer prompt.
-    - Reopened tasks join the current pass and it does not close until they are done.
-    - **Cap: one revision per contract.** If the same contract breaks a second time, the spec is
-      wrong at a level this loop can't fix — mark the affected tasks BLOCKED with `spec-defect`
-      and carry it to the summary. The bounded-loop property is what keeps this pipeline a DAG.
-13. **Spec-defect circuit breaker.** If at any point more than half of all *attempted* tasks are
-    BLOCKED with `BLOCKER: spec-defect`, the spec is the problem, not the workers. Pause
-    dispatch and `SendMessage` the accumulated blocker reports to `task-specialist` (its Phase 4
-    spawn is resumable in-session) for a corrected graph of the not-yet-merged remainder;
-    re-validate it, then resume dispatch. **Strictly once per run** — the bounded-loop property
-    is what keeps this pipeline a DAG.
-14. Update each task's status and attempt count in `<run-dir>/tasks.json` as it resolves
-    (`pending` → `running` → `pass` → `merged`, or `blocked` / `skipped` / `unmerged`), and
-    append every spawn to `run.json`'s `spawns` as the pass goes out.
-15. **Close the pass, report, and loop.** The pass is closed only once every task dispatched into
-    it — including every rework, integration retry, and contract reopening spawned to resolve it —
-    has reached a terminal status (MERGED, BLOCKED, UNMERGED, or SKIPPED). **Start no task from
-    the next pass early.** Then report what finished, in one short block: each task's title and
-    outcome, anything not merged and why, and how many candidates remain. Then go back to step 2.
-    The phase itself is done when the candidate set is empty and every task is MERGED, BLOCKED,
-    SKIPPED, or UNMERGED.
-
-## Phase 6 — Verify & hand off
-
-Every merged task was only ever reviewed against its *own* acceptance criteria, by design.
-Nothing before this point has run the assembled result, and nothing before this point has
-compared it to what was actually asked for. This phase does both. Do not skip it.
-
-1. **Run the suite** the test plan named in Phase 3 (in `micro` mode: the repo's own test/build
-   command) against `dag/<run-id>`, once, and record the verbatim outcome in
-   `<run-dir>/integration.md`. Individually-merged tasks can still be collectively broken.
-2. **Acceptance review.** Spawn one `integration-reviewer` with the original request, the merged
-   spec's path, the `base_commit`, and the branch name. It reviews the *whole diff*
-   (`git diff <base_commit>..dag/<run-id>`) against the spec and the request — the only agent in
-   the pipeline that ever does — and ends with `INTEGRATION: PASS` or `INTEGRATION: FLAGGED <n>`.
-   Its findings go into the final summary; they do **not** trigger another build loop. Fixing
-   them is a fresh request, not a silent extra loop here.
-3. **If the integrated suite failed, report the failure honestly with its output.** Do not
-   describe the run as successful.
-4. **Clean up and hand back**: `git worktree prune`; keep (and name) only the worktrees of
-   UNMERGED tasks; check the main working tree back out to `base_branch`, leaving `dag/<run-id>`
-   intact for the user to review. Mark phase 6 complete in `run.json`.
-
+member hasn't reported: respawn it once with the same prompt. If the respawn also fails, proceed
+without it — record the gap in the run directory and in your final summary. A missing
+specialist's section in the merged spec reads "not produced (agent failed twice)"; a missing
+reviewer just means that round had one fewer. Never block the whole pipeline on one unresponsive
+agent.
 ## Done
 
 Report a summary and stop:

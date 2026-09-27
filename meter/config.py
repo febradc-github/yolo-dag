@@ -54,7 +54,11 @@ DEFAULT_DEADLINE_MS = 50
 # adaptation this codebase's spec-reviewer contract requires) have real
 # implementations. Every v2 module from the handoff doc (M8-M15) now has a
 # real implementation except M7's v1 sibling Codemod, which the spec itself
-# says ships last or not at all.
+# says ships last or not at all. v3 adds two modules of this repo's own,
+# both default-on: `fold` (M16 — deterministic consolidation that replaces
+# the spec-consolidator spawn when it can, and escalates to it when it
+# can't; see meter/fold.py) and `gauge` (M17 — risk-proportional Phase 2
+# review depth, reduction-only and floored; see meter/gauge.py).
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "port": DEFAULT_PORT,
@@ -89,6 +93,14 @@ DEFAULTS: dict[str, Any] = {
         "pull": {"enabled": False, "promote_threshold": 0.8, "per_agent_override": {}},
         "quorum": {"enabled": False, "escalate_severity": "major", "sample_rate": 0.15,
                    "unique_finding_threshold": 0.05, "domain_table": {}},
+        # v3 (M16/M17): the two token-reduction modules that change *how many
+        # agents run* rather than how much each one reads. Both default ON —
+        # unlike M8/M10 they need no measurement campaign to be safe: Fold
+        # escalates to the real agent whenever its deterministic path isn't
+        # provably correct, and Gauge only ever reduces from a ceiling it
+        # cannot raise, behind a hard floor for high-risk domains.
+        "fold": {"enabled": True},
+        "gauge": {"enabled": True, "min_reviewers": 1, "force_full": False},
     },
     # Diagnostics-only: when true, every hook payload the daemon receives is
     # appended verbatim to probe-capture.jsonl in the plugin data dir, for
